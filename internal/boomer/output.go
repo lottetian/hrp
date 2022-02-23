@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/rs/zerolog/log"
+	"gonum.org/v1/gonum/stat"
 )
 
 // Output is primarily responsible for printing test results to different destinations
@@ -41,6 +42,75 @@ type ConsoleOutput struct {
 // NewConsoleOutput returns a ConsoleOutput.
 func NewConsoleOutput() *ConsoleOutput {
 	return &ConsoleOutput{}
+}
+
+// added by LotteTian
+//fiftyResponseTime      float64 // 50%请求响应时间
+//ninetyResponseTime     float64 // 90%请求响应时间
+//ninetyFiveResponseTime float64 // 95%请求响应时间
+//ninetyNineResponseTime float64 // 99%请求响应时间
+func getFiftyResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
+	fiftyResponseTime := float64(0)
+	responseTimes, _ := url2responseTimes[name]
+	if len(responseTimes) != 0 {
+		var sortedKeys []float64
+		for k, v := range responseTimes {
+			for i := 0; i <= int(v); i++ {
+				sortedKeys = append(sortedKeys, float64(k))
+			}
+		}
+		sort.Float64s(sortedKeys)
+		fiftyResponseTime = stat.Quantile(0.50, stat.Empirical, sortedKeys, nil)
+	}
+	return fiftyResponseTime
+}
+
+func getNinetyResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
+	ninetyResponseTime := float64(0)
+	responseTimes, _ := url2responseTimes[name]
+	if len(responseTimes) != 0 {
+		var sortedKeys []float64
+		for k, v := range responseTimes {
+			for i := 0; i <= int(v); i++ {
+				sortedKeys = append(sortedKeys, float64(k))
+			}
+		}
+		sort.Float64s(sortedKeys)
+		ninetyResponseTime = stat.Quantile(0.90, stat.Empirical, sortedKeys, nil)
+	}
+	return ninetyResponseTime
+}
+
+func getNinetyFiveResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
+	ninetyFiveResponseTime := float64(0)
+	responseTimes, _ := url2responseTimes[name]
+	if len(responseTimes) != 0 {
+		var sortedKeys []float64
+		for k, v := range responseTimes {
+			for i := 0; i <= int(v); i++ {
+				sortedKeys = append(sortedKeys, float64(k))
+			}
+		}
+		sort.Float64s(sortedKeys)
+		ninetyFiveResponseTime = stat.Quantile(0.95, stat.Empirical, sortedKeys, nil)
+	}
+	return ninetyFiveResponseTime
+}
+
+func getNinetyNineResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
+	ninetyNineResponseTime := float64(0)
+	responseTimes, _ := url2responseTimes[name]
+	if len(responseTimes) != 0 {
+		var sortedKeys []float64
+		for k, v := range responseTimes {
+			for i := 0; i <= int(v); i++ {
+				sortedKeys = append(sortedKeys, float64(k))
+			}
+		}
+		sort.Float64s(sortedKeys)
+		ninetyNineResponseTime = stat.Quantile(0.99, stat.Empirical, sortedKeys, nil)
+	}
+	return ninetyNineResponseTime
 }
 
 func getMedianResponseTime(numRequests int64, responseTimes map[int64]int64) int64 {
@@ -136,10 +206,10 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 	println(fmt.Sprintf("Accumulated Transactions: %d Passed, %d Failed",
 		output.TransactionsPassed, output.TransactionsFailed))
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Type", "Name", "# requests", "# fails", "Median", "Average", "Min", "Max", "Content Size", "# reqs/sec", "# fails/sec"})
+	table.SetHeader([]string{"Type", "Name", "# requests", "# fails", "Median", "Average", "Min", "Max", "Content Size", "# reqs/sec", "# fails/sec", "50%", "90%", "95%", "99%"})
 
 	for _, stat := range output.Stats {
-		row := make([]string, 11)
+		row := make([]string, 15)
 		row[0] = stat.Method
 		row[1] = stat.Name
 		row[2] = strconv.FormatInt(stat.NumRequests, 10)
@@ -151,6 +221,10 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 		row[8] = strconv.FormatInt(stat.avgContentLength, 10)
 		row[9] = strconv.FormatFloat(stat.currentRps, 'f', 2, 64)
 		row[10] = strconv.FormatFloat(stat.currentFailPerSec, 'f', 2, 64)
+		row[11] = strconv.FormatFloat(stat.fiftyResponseTime, 'f', 2, 64)
+		row[12] = strconv.FormatFloat(stat.ninetyResponseTime, 'f', 2, 64)
+		row[13] = strconv.FormatFloat(stat.ninetyFiveResponseTime, 'f', 2, 64)
+		row[14] = strconv.FormatFloat(stat.ninetyNineResponseTime, 'f', 2, 64)
 		table.Append(row)
 	}
 	table.Render()
@@ -165,6 +239,12 @@ type statsEntryOutput struct {
 	avgContentLength   int64   // average content size
 	currentRps         float64 // # reqs/sec
 	currentFailPerSec  float64 // # fails/sec
+
+	// added by LotteTian
+	fiftyResponseTime      float64 // 50%请求响应时间
+	ninetyResponseTime     float64 // 90%请求响应时间
+	ninetyFiveResponseTime float64 // 95%请求响应时间
+	ninetyNineResponseTime float64 // 99%请求响应时间
 }
 
 type dataOutput struct {
@@ -259,15 +339,34 @@ func deserializeStatsEntry(stat interface{}) (entryOutput *statsEntryOutput, err
 	}
 
 	numRequests := entry.NumRequests
-	entryOutput = &statsEntryOutput{
-		statsEntry:         entry,
-		medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
-		avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
-		avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
-		currentRps:         getCurrentRps(numRequests, duration),
-		currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration),
+	if entry.Name == "Total" {
+		duration = float64(entry.LastRequestTimestamp - entry.StartTime)
+		entryOutput = &statsEntryOutput{
+			statsEntry:         entry,
+			medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
+			avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
+			avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
+			currentRps:         getCurrentRps(numRequests, duration),
+			currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration)}
+		return
+	} else {
+		duration = float64(reportStatsInterval / time.Second)
+		entryOutput = &statsEntryOutput{
+			statsEntry:         entry,
+			medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
+			avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
+			avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
+			currentRps:         getCurrentRps(numRequests, duration),
+			currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration),
+			// added by LotteTian
+			fiftyResponseTime:      getFiftyResponseTime(entry.Url2ResponseTimes, entry.Name),      // 50%请求响应时间
+			ninetyResponseTime:     getNinetyResponseTime(entry.Url2ResponseTimes, entry.Name),     // 90%请求响应时间
+			ninetyFiveResponseTime: getNinetyFiveResponseTime(entry.Url2ResponseTimes, entry.Name), // 95%请求响应时间
+			ninetyNineResponseTime: getNinetyNineResponseTime(entry.Url2ResponseTimes, entry.Name), // 99%请求响应时间
+			//maxResponseTime:        getMaxResponseTime(entry.ResponseTimes),        // 最大请求响应时间
+		}
+		return
 	}
-	return
 }
 
 // gauge vectors for requests
@@ -311,6 +410,38 @@ var (
 		prometheus.GaugeOpts{
 			Name: "max_response_time",
 			Help: "The max response time",
+		},
+		[]string{"method", "name"},
+	)
+	// added by LotteTian
+	gaugeFiftyResponseTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "fifty_response_time",
+			Help: "The 50% response time",
+		},
+		[]string{"method", "name"},
+	)
+	// added by LotteTian
+	gaugeNinetyResponseTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "ninety_response_time",
+			Help: "The 90% response time",
+		},
+		[]string{"method", "name"},
+	)
+	// added by LotteTian
+	gaugeNinetyNineResponseTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "ninetyNine_response_time",
+			Help: "The 99% response time",
+		},
+		[]string{"method", "name"},
+	)
+	// added by LotteTian
+	gaugeNinetyFiveResponseTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "ninetyFive_response_time",
+			Help: "The 95% response time",
 		},
 		[]string{"method", "name"},
 	)
@@ -437,6 +568,10 @@ func (o *PrometheusPusherOutput) OnStart() {
 		gaugeAverageResponseTime,
 		gaugeMinResponseTime,
 		gaugeMaxResponseTime,
+		gaugeFiftyResponseTime,
+		gaugeNinetyResponseTime,
+		gaugeNinetyFiveResponseTime,
+		gaugeNinetyNineResponseTime,
 		gaugeAverageContentLength,
 		gaugeCurrentRPS,
 		gaugeCurrentFailPerSec,
@@ -497,6 +632,12 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 		gaugeAverageResponseTime.WithLabelValues(method, name).Set(float64(stat.avgResponseTime))
 		gaugeMinResponseTime.WithLabelValues(method, name).Set(float64(stat.MinResponseTime))
 		gaugeMaxResponseTime.WithLabelValues(method, name).Set(float64(stat.MaxResponseTime))
+		// ⬇ added by lotteTian
+		gaugeFiftyResponseTime.WithLabelValues(method, name).Set(float64(stat.fiftyResponseTime))
+		gaugeNinetyResponseTime.WithLabelValues(method, name).Set(float64(stat.ninetyResponseTime))
+		gaugeNinetyFiveResponseTime.WithLabelValues(method, name).Set(float64(stat.ninetyFiveResponseTime))
+		gaugeNinetyNineResponseTime.WithLabelValues(method, name).Set(float64(stat.ninetyNineResponseTime))
+		// ⬆ added by lotteTian
 		gaugeAverageContentLength.WithLabelValues(method, name).Set(float64(stat.avgContentLength))
 		gaugeCurrentRPS.WithLabelValues(method, name).Set(stat.currentRps)
 		gaugeCurrentFailPerSec.WithLabelValues(method, name).Set(stat.currentFailPerSec)

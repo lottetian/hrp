@@ -73,7 +73,9 @@ func (s *requestStats) logTransaction(name string, success bool, responseTime in
 
 func (s *requestStats) logRequest(method, name string, responseTime int64, contentLength int64) {
 	s.total.log(responseTime, contentLength)
+	s.total.logUrl2Response(responseTime, name)
 	s.get(name, method).log(responseTime, contentLength)
+	s.get(name, method).Url2ResponseTimes = s.total.Url2ResponseTimes
 }
 
 func (s *requestStats) logError(method, name, err string) {
@@ -188,6 +190,8 @@ type statsEntry struct {
 	// Boomer doesn't allow None response time for requests like locust.
 	// num_none_requests is added to keep compatible with locust.
 	NumNoneRequests int64 `json:"num_none_requests"`
+	// add by LotteTian
+	Url2ResponseTimes map[string]map[int64]int64 `json:"url_2_response_times"`
 }
 
 func (s *statsEntry) reset() {
@@ -202,6 +206,7 @@ func (s *statsEntry) reset() {
 	s.NumReqsPerSec = make(map[int64]int64)
 	s.NumFailPerSec = make(map[int64]int64)
 	s.TotalContentLength = 0
+	s.Url2ResponseTimes = make(map[string]map[int64]int64)
 }
 
 func (s *statsEntry) log(responseTime int64, contentLength int64) {
@@ -211,6 +216,28 @@ func (s *statsEntry) log(responseTime int64, contentLength int64) {
 	s.logResponseTime(responseTime)
 
 	s.TotalContentLength += contentLength
+}
+
+func (s *statsEntry) logUrl2Response(responseTime int64, name string) {
+	var roundedResponseTime int64
+
+	if responseTime < 100 {
+		roundedResponseTime = responseTime
+	} else if responseTime < 1000 {
+		roundedResponseTime = int64(round(float64(responseTime), .5, -1))
+	} else if responseTime < 10000 {
+		roundedResponseTime = int64(round(float64(responseTime), .5, -2))
+	} else {
+		roundedResponseTime = int64(round(float64(responseTime), .5, -3))
+	}
+
+	_, ok := s.Url2ResponseTimes[name]
+	if !ok {
+		s.Url2ResponseTimes[name] = make(map[int64]int64)
+		s.Url2ResponseTimes[name][roundedResponseTime] = 1
+	} else {
+		s.Url2ResponseTimes[name][roundedResponseTime]++
+	}
 }
 
 func (s *statsEntry) logTimeOfRequest() {
@@ -290,7 +317,14 @@ func (s *statsEntry) serialize() map[string]interface{} {
 
 func (s *statsEntry) getStrippedReport() map[string]interface{} {
 	report := s.serialize()
-	s.reset()
+	//s.reset()
+	return report
+}
+
+// added by lotteTian
+func (s *statsEntry) getAccumulativeReport() map[string]interface{} {
+	report := s.serialize()
+	//s.reset()
 	return report
 }
 

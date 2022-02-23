@@ -1,8 +1,8 @@
 package hrp
 
 import (
+	"github.com/httprunner/hrp/internal/boomer"
 	"testing"
-	"time"
 )
 
 func TestBoomerStandaloneRun(t *testing.T) {
@@ -28,7 +28,8 @@ func TestBoomerStandaloneRun(t *testing.T) {
 	testcase2 := &TestCasePath{demoTestCaseJSONPath}
 
 	b := NewBoomer(2, 1)
-	go b.Run(testcase1, testcase2)
-	time.Sleep(5 * time.Second)
-	b.Quit()
+	b.AddOutput(boomer.NewConsoleOutput())
+	b.Run(testcase1, testcase2)
+	//time.Sleep(5 * time.Second)
+	//b.Quit()
 }
