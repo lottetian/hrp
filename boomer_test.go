@@ -1,7 +1,6 @@
 package hrp
 
 import (
-	"github.com/lottetian/hrp/internal/boomer"
 	"testing"
 )
 
@@ -28,7 +27,7 @@ func TestBoomerStandaloneRun(t *testing.T) {
 	testcase2 := &TestCasePath{demoTestCaseJSONPath}
 
 	b := NewBoomer(2, 1)
-	b.AddOutput(boomer.NewConsoleOutput())
+	b.AddOutput(b.NewConsoleOutput())
 	b.Run(testcase1, testcase2)
 	//time.Sleep(5 * time.Second)
 	//b.Quit()

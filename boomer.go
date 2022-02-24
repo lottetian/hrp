@@ -34,6 +34,11 @@ func (b *HRPBoomer) SetDebug(debug bool) *HRPBoomer {
 	return b
 }
 
+// NewConsoleOutput returns a ConsoleOutput.
+func (b *HRPBoomer) NewConsoleOutput() *boomer.ConsoleOutput {
+	return &boomer.ConsoleOutput{}
+}
+
 // Run starts to run load test for one or multiple testcases.
 func (b *HRPBoomer) Run(testcases ...ITestCase) {
 	event := ga.EventTracking{
