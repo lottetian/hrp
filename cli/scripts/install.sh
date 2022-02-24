@@ -2,7 +2,7 @@
 # install hrp with one shell command
 # bash -c "$(curl -ksSL https://httprunner.oss-cn-beijing.aliyuncs.com/install.sh)"
 
-LATEST_VERSION="v0.6.2.1"
+LATEST_VERSION="v1.0.0"
 
 set -e
 
