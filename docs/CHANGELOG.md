@@ -4,6 +4,9 @@
 
 - feat: support customized setup/teardown hooks (variable assignment not supported)
 
+## v0.6.2.1 (2022-02-24)
+- change: add new tag v0.6.2.1 by lotteTian
+
 ## v0.6.2 (2022-02-22)
 
 - feat: support text/html extraction with regex
