@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"path"
 
-	"github.com/httprunner/hrp/internal/builtin"
-	"github.com/httprunner/hrp/internal/ga"
+	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/ga"
 	"github.com/rs/zerolog/log"
 )
 
@@ -70,7 +70,7 @@ func CreateScaffold(projectName string) error {
 	}
 
 	// download plugin dependency
-	if err := builtin.ExecCommand(exec.Command("go", "get", "github.com/httprunner/hrp/plugin"), pluginDir); err != nil {
+	if err := builtin.ExecCommand(exec.Command("go", "get", "github.com/lottetian/hrp/plugin"), pluginDir); err != nil {
 		return err
 	}
 

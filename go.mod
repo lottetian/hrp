@@ -1,4 +1,4 @@
-module github.com/httprunner/hrp
+module github.com/lottetian/hrp
 
 go 1.16
 
@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.0.4
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/google/uuid v1.3.0
-	github.com/httprunner/hrp/plugin v0.0.0
+	github.com/lottetian/hrp/plugin v0.0.0
 	github.com/jinzhu/copier v0.3.2
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/maja42/goval v1.2.1
@@ -22,4 +22,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
 
-replace github.com/httprunner/hrp/plugin => ./plugin
+replace github.com/lottetian/hrp/plugin => ./plugin

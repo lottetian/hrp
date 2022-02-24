@@ -17,7 +17,7 @@ load testing and digital experience monitoring (DEM). Enjoy! ✨ 🚀 ✨
 
 License: Apache-2.0
 Website: https://httprunner.com
-Github: https://github.com/httprunner/hrp
+Github: https://github.com/lottetian/hrp
 Copyright 2021 debugtalk
 
 ### Options

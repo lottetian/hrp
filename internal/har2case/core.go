@@ -14,9 +14,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
-	"github.com/httprunner/hrp"
-	"github.com/httprunner/hrp/internal/builtin"
-	"github.com/httprunner/hrp/internal/ga"
+	"github.com/lottetian/hrp"
+	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/ga"
 )
 
 const (

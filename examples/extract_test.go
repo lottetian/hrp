@@ -3,7 +3,7 @@ package examples
 import (
 	"testing"
 
-	"github.com/httprunner/hrp"
+	"github.com/lottetian/hrp"
 )
 
 // reference extracted variables for validation in the same step

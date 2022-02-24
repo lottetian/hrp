@@ -3,7 +3,7 @@ package examples
 import (
 	"testing"
 
-	"github.com/httprunner/hrp"
+	"github.com/lottetian/hrp"
 )
 
 func TestCaseValidateStep(t *testing.T) {

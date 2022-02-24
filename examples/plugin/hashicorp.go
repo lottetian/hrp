@@ -1,6 +1,6 @@
 package main
 
-import "github.com/httprunner/hrp/plugin"
+import "github.com/lottetian/hrp/plugin"
 
 // register functions and build to plugin binary
 func main() {

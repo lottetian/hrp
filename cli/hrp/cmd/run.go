@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/httprunner/hrp"
+	"github.com/lottetian/hrp"
 )
 
 // runCmd represents the run command

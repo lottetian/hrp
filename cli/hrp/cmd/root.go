@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/httprunner/hrp/internal/version"
+	"github.com/lottetian/hrp/internal/version"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -29,7 +29,7 @@ load testing and digital experience monitoring (DEM). Enjoy! ✨ 🚀 ✨
 
 License: Apache-2.0
 Website: https://httprunner.com
-Github: https://github.com/httprunner/hrp
+Github: https://github.com/lottetian/hrp
 Copyright 2021 debugtalk`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		var noColor = false

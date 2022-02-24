@@ -109,7 +109,7 @@
 
 [jmespath]: https://jmespath.org/
 [mkdocs]: https://www.mkdocs.org/
-[github-actions]: https://github.com/httprunner/hrp/actions
+[github-actions]: https://github.com/lottetian/hrp/actions
 [boomer]: github.com/myzhan/boomer
 [sentry sdk]: https://github.com/getsentry/sentry-go
 [pushgateway]: https://github.com/prometheus/pushgateway

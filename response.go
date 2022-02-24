@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
-	"github.com/httprunner/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/builtin"
 )
 
 func newResponseObject(t *testing.T, parser *parser, resp *http.Response) (*responseObject, error) {

@@ -3,8 +3,8 @@ package examples
 import (
 	"testing"
 
-	"github.com/httprunner/hrp"
-	"github.com/httprunner/hrp/internal/builtin"
+	"github.com/lottetian/hrp"
+	"github.com/lottetian/hrp/internal/builtin"
 )
 
 var rendezvousTestcase = &hrp.TestCase{

@@ -12,8 +12,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
-	"github.com/httprunner/hrp/internal/builtin"
-	"github.com/httprunner/hrp/plugin/common"
+	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/plugin/common"
 )
 
 func newParser() *parser {

@@ -1,6 +1,6 @@
 package scaffold
 
-import "github.com/httprunner/hrp"
+import "github.com/lottetian/hrp"
 
 var demoTestCase = &hrp.TestCase{
 	Config: hrp.NewConfig("demo with complex mechanisms").
@@ -72,7 +72,7 @@ var demoPlugin = `package main
 import (
 	"fmt"
 
-	"github.com/httprunner/hrp/plugin"
+	"github.com/lottetian/hrp/plugin"
 )
 
 func SumTwoInt(a, b int) int {

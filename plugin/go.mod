@@ -1,4 +1,4 @@
-module github.com/httprunner/hrp/plugin
+module github.com/lottetian/hrp/plugin
 
 go 1.16
 

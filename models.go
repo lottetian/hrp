@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/httprunner/hrp/internal/version"
+	"github.com/lottetian/hrp/internal/version"
 )
 
 const (

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/httprunner/hrp/cli/hrp/cmd"
+	"github.com/lottetian/hrp/cli/hrp/cmd"
 )
 
 func main() {

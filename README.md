@@ -1,9 +1,9 @@
 # hrp (HttpRunner+)
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/httprunner/hrp.svg)](https://pkg.go.dev/github.com/httprunner/hrp)
-[![Github Actions](https://github.com/httprunner/hrp/actions/workflows/unittest.yml/badge.svg)](https://github.com/httprunner/hrp/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/lottetian/hrp.svg)](https://pkg.go.dev/github.com/lottetian/hrp)
+[![Github Actions](https://github.com/lottetian/hrp/actions/workflows/unittest.yml/badge.svg)](https://github.com/lottetian/hrp/actions)
 [![codecov](https://codecov.io/gh/httprunner/hrp/branch/main/graph/badge.svg?token=HPCQWCD7KO)](https://codecov.io/gh/httprunner/hrp)
-[![Go Report Card](https://goreportcard.com/badge/github.com/httprunner/hrp)](https://goreportcard.com/report/github.com/httprunner/hrp)
+[![Go Report Card](https://goreportcard.com/badge/github.com/lottetian/hrp)](https://goreportcard.com/report/github.com/lottetian/hrp)
 [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B27856%2Fgithub.com%2Fhttprunner%2Fhrp.svg?type=shield)](https://app.fossa.com/reports/c2742455-c8ab-4b13-8fd7-4a35ba0b2840)
 
 `hrp` aims to be a one-stop solution for HTTP(S) testing, covering API testing, load testing and digital experience monitoring (DEM).
@@ -68,7 +68,7 @@ $ bash -c "$(wget https://httprunner.oss-cn-beijing.aliyuncs.com/install.sh -O -
 If you are a golang developer, you can also install `hrp` with `go get`.
 
 ```bash
-$ go get github.com/httprunner/hrp/cli/hrp
+$ go get github.com/lottetian/hrp/cli/hrp
 ```
 
 Since installed, you will get a `hrp` command with multiple sub-commands.
@@ -88,7 +88,7 @@ load testing and digital experience monitoring (DEM). Enjoy! ✨ 🚀 ✨
 
 License: Apache-2.0
 Website: https://httprunner.com
-Github: https://github.com/httprunner/hrp
+Github: https://github.com/lottetian/hrp
 Copyright 2021 debugtalk
 
 Usage:
@@ -214,7 +214,7 @@ Vary: Accept-Encoding
 Beside using `hrp` as a CLI tool, you can also use it as golang library.
 
 ```bash
-$ go get -u github.com/httprunner/hrp
+$ go get -u github.com/lottetian/hrp
 ```
 
 This is an example of `HttpRunner+` testcase. You can find more in the [`examples`][examples] directory.
@@ -227,7 +227,7 @@ This is an example of `HttpRunner+` testcase. You can find more in the [`example
 import (
     "testing"
 
-    "github.com/httprunner/hrp"
+    "github.com/lottetian/hrp"
 )
 
 func TestCaseDemo(t *testing.T) {
@@ -309,8 +309,8 @@ func TestCaseDemo(t *testing.T) {
 [HAR]: http://httparchive.org/
 [hashicorp plugin]: https://github.com/hashicorp/go-plugin
 [go plugin]: https://pkg.go.dev/plugin
-[demo.json]: https://github.com/httprunner/hrp/blob/main/examples/demo.json
-[examples]: https://github.com/httprunner/hrp/blob/main/examples/
+[demo.json]: https://github.com/lottetian/hrp/blob/main/examples/demo.json
+[examples]: https://github.com/lottetian/hrp/blob/main/examples/
 [CHANGELOG]: docs/CHANGELOG.md
 [pushgateway]: https://github.com/prometheus/pushgateway
 [survey]: https://wj.qq.com/s2/9699514/0d19/

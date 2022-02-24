@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/httprunner/hrp/internal/scaffold"
+	"github.com/lottetian/hrp/internal/scaffold"
 )
 
 var scaffoldCmd = &cobra.Command{

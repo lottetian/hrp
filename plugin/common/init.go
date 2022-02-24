@@ -10,8 +10,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	pluginHost "github.com/httprunner/hrp/plugin/host"
-	pluginShared "github.com/httprunner/hrp/plugin/shared"
+	pluginHost "github.com/lottetian/hrp/plugin/host"
+	pluginShared "github.com/lottetian/hrp/plugin/shared"
 )
 
 type pluginFile string

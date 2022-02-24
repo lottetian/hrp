@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/httprunner/hrp/internal/version"
+	"github.com/lottetian/hrp/internal/version"
 )
 
 type IEvent interface {

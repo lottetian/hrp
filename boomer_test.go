@@ -1,7 +1,7 @@
 package hrp
 
 import (
-	"github.com/httprunner/hrp/internal/boomer"
+	"github.com/lottetian/hrp/internal/boomer"
 	"testing"
 )
 
@@ -10,7 +10,7 @@ func TestBoomerStandaloneRun(t *testing.T) {
 	defer removeHashicorpPlugin()
 
 	testcase1 := &TestCase{
-		Config: NewConfig("TestCase1").SetBaseURL("http://httpbin.org"),
+		Config: NewConfig("TestCase1").SetBaseURL("https://httpbin.org"),
 		TestSteps: []IStep{
 			NewStep("headers").
 				GET("/headers").

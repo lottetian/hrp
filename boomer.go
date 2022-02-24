@@ -7,9 +7,9 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/rs/zerolog/log"
 
-	"github.com/httprunner/hrp/internal/boomer"
-	"github.com/httprunner/hrp/internal/ga"
-	"github.com/httprunner/hrp/plugin/common"
+	"github.com/lottetian/hrp/internal/boomer"
+	"github.com/lottetian/hrp/internal/ga"
+	"github.com/lottetian/hrp/plugin/common"
 )
 
 func NewBoomer(spawnCount int, spawnRate float64) *HRPBoomer {

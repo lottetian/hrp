@@ -7,7 +7,7 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 
-	"github.com/httprunner/hrp/plugin/shared"
+	"github.com/lottetian/hrp/plugin/shared"
 )
 
 var client *plugin.Client

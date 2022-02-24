@@ -8,8 +8,8 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 
-	"github.com/httprunner/hrp/plugin/common"
-	pluginShared "github.com/httprunner/hrp/plugin/shared"
+	"github.com/lottetian/hrp/plugin/common"
+	pluginShared "github.com/lottetian/hrp/plugin/shared"
 )
 
 // functionsMap stores plugin functions
