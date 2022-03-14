@@ -1,7 +1,7 @@
 package hrp
 
 import (
-	"encoding/json"
+	builtinJSON "encoding/json"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -12,8 +12,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
+	pluginInternal "github.com/httprunner/plugin/go"
+	pluginUtils "github.com/httprunner/plugin/utils"
 	"github.com/lottetian/hrp/internal/builtin"
-	"github.com/lottetian/hrp/plugin/common"
 )
 
 func newParser() *parser {
@@ -21,7 +22,7 @@ func newParser() *parser {
 }
 
 type parser struct {
-	plugin common.Plugin // plugin is used to call functions
+	plugin pluginInternal.IPlugin // plugin is used to call functions
 }
 
 func buildURL(baseURL, stepURL string) string {
@@ -68,7 +69,7 @@ func (p *parser) parseData(raw interface{}, variablesMapping map[string]interfac
 	switch rawValue.Kind() {
 	case reflect.String:
 		// json.Number
-		if rawValue, ok := raw.(json.Number); ok {
+		if rawValue, ok := raw.(builtinJSON.Number); ok {
 			return parseJSONNumber(rawValue)
 		}
 		// other string
@@ -108,7 +109,7 @@ func (p *parser) parseData(raw interface{}, variablesMapping map[string]interfac
 	}
 }
 
-func parseJSONNumber(raw json.Number) (interface{}, error) {
+func parseJSONNumber(raw builtinJSON.Number) (interface{}, error) {
 	if strings.Contains(raw.String(), ".") {
 		// float64
 		return raw.Float64()
@@ -252,7 +253,7 @@ func (p *parser) callFunc(funcName string, arguments ...interface{}) (interface{
 	fn := reflect.ValueOf(function)
 
 	// call with builtin function
-	return common.CallFunc(fn, arguments...)
+	return pluginUtils.CallFunc(fn, arguments...)
 }
 
 // merge two variables mapping, the first variables have higher priority
