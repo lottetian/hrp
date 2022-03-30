@@ -28,6 +28,12 @@ func (c *TConfig) SetVerifySSL(verify bool) *TConfig {
 	return c
 }
 
+// SetPluginPath set plugin path
+func (c *TConfig) SetPluginPath(path string) *TConfig {
+	c.Path = path
+	return c
+}
+
 // WithParameters sets parameters for current testcase.
 func (c *TConfig) WithParameters(parameters map[string]interface{}) *TConfig {
 	c.Parameters = parameters

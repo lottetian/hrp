@@ -1,9 +1,8 @@
 package examples
 
 import (
-	"testing"
-
 	"github.com/lottetian/hrp"
+	"testing"
 )
 
 func TestCaseCallFunction(t *testing.T) {
@@ -14,12 +13,15 @@ func TestCaseCallFunction(t *testing.T) {
 				"n": 5,
 				"a": 12.3,
 				"b": 3.45,
+				"m": "10",
 			}).
-			SetVerifySSL(false),
+			SetVerifySSL(false).
+			SetPluginPath(""),
+
 		TestSteps: []hrp.IStep{
 			hrp.NewStep("get with params").
 				GET("/get").
-				WithParams(map[string]interface{}{"foo1": "${gen_random_string($n)}", "foo2": "${max($a, $b)}", "foo3": "Foo3"}).
+				WithParams(map[string]interface{}{"foo1": "${parseInt64($n)}", "foo2": "${max($a, $b)}", "foo3": "Foo3"}).
 				WithHeaders(map[string]string{"User-Agent": "HttpRunnerPlus"}).
 				Extract().
 				WithJmesPath("body.args.foo1", "varFoo1").
