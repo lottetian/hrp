@@ -373,7 +373,12 @@ func (r *caseRunner) runStep(index int, caseConfig *TConfig) (stepResult *stepDa
 		// run request
 		stepResult, err = r.runStepRequest(copiedStep)
 		if err != nil {
-			log.Error().Err(err).Msg("run request step failed")
+			traceId, ok := copiedStep.Request.Headers["Cloud-Trace-Id"]
+			if ok {
+				log.Error().Err(err).Msg("run request step failed,traceId is:" + traceId)
+			} else {
+				log.Error().Err(err).Msg("run request step failed")
+			}
 		}
 	}
 
