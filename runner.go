@@ -371,14 +371,20 @@ func (r *caseRunner) runStep(index int, caseConfig *TConfig) (stepResult *stepDa
 		}
 		copiedStep.Request.URL = buildURL(caseConfig.BaseURL, convertString(requestUrl)) // avoid data racing
 		// run request
+		//traceId, ok := copiedStep.Request.Headers["Cloud-Trace-Id"]
+		//if ok{
+		//	requestHeaders, _ := r.parser.parseString(traceId, copiedStep.Variables)
+		//	copiedStep.Request.Headers["Cloud-Trace-Id"] = requestHeaders.(string)
+		//}
 		stepResult, err = r.runStepRequest(copiedStep)
 		if err != nil {
-			traceId, ok := copiedStep.Request.Headers["Cloud-Trace-Id"]
-			if ok {
-				log.Error().Err(err).Msg("run request step failed,traceId is:" + traceId)
-			} else {
-				log.Error().Err(err).Msg("run request step failed")
-			}
+			log.Error().Err(err).Msg("run request step failed")
+			//traceId, ok := copiedStep.Request.Headers["Cloud-Trace-Id"]
+			//if ok {
+			//	log.Error().Err(err).Msg("run request step failed,traceId is:" + traceId)
+			//} else {
+			//	log.Error().Err(err).Msg("run request step failed")
+			//}
 		}
 	}
 
@@ -797,7 +803,12 @@ func (r *caseRunner) runStepRequest(step *TStep) (stepResult *stepData, err erro
 	resp, err := r.hrpRunner.client.Do(req)
 	stepResult.Elapsed = time.Since(start).Milliseconds()
 	if err != nil {
-		return stepResult, errors.Wrap(err, "do request failed")
+		traceId, ok := req.Header["Cloud-Trace-Id"]
+		if ok {
+			return stepResult, errors.Wrap(err, "do request failed, traceId : "+traceId[0])
+		} else {
+			return stepResult, errors.Wrap(err, "do request failed")
+		}
 	}
 	defer resp.Body.Close()
 
