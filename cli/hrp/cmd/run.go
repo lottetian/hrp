@@ -26,7 +26,6 @@ var runCmd = &cobra.Command{
 			paths = append(paths, &hrp.TestCasePath{Path: arg})
 		}
 		runner := hrp.NewRunner(nil).
-			SetDebug(!silentFlag).
 			SetFailfast(!continueOnFailure).
 			SetSaveTests(saveTests)
 		if genHTMLReport {
