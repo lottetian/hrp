@@ -321,7 +321,12 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	resp, err := r.hrpRunner.client.Do(rb.req)
 	stepResult.Elapsed = time.Since(start).Milliseconds()
 	if err != nil {
-		return stepResult, errors.Wrap(err, "do request failed")
+		traceId, ok := rb.req.Header["Cloud-Trace-Id"]
+		if ok {
+			return stepResult, errors.Wrap(err, "do request failed, traceId : "+traceId[0])
+		} else {
+			return stepResult, errors.Wrap(err, "do request failed")
+		}
 	}
 	defer resp.Body.Close()
 
