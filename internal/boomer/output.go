@@ -13,7 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/rs/zerolog/log"
-	"gonum.org/v1/gonum/stat"
+	Stat "gonum.org/v1/gonum/stat"
 )
 
 // Output is primarily responsible for printing test results to different destinations
@@ -60,7 +60,7 @@ func getFiftyResponseTime(url2responseTimes map[string]map[int64]int64, name str
 			}
 		}
 		sort.Float64s(sortedKeys)
-		fiftyResponseTime = stat.Quantile(0.50, stat.Empirical, sortedKeys, nil)
+		fiftyResponseTime = Stat.Quantile(0.50, Stat.Empirical, sortedKeys, nil)
 	}
 	return fiftyResponseTime
 }
@@ -76,7 +76,7 @@ func getNinetyResponseTime(url2responseTimes map[string]map[int64]int64, name st
 			}
 		}
 		sort.Float64s(sortedKeys)
-		ninetyResponseTime = stat.Quantile(0.90, stat.Empirical, sortedKeys, nil)
+		ninetyResponseTime = Stat.Quantile(0.90, Stat.Empirical, sortedKeys, nil)
 	}
 	return ninetyResponseTime
 }
@@ -92,7 +92,7 @@ func getNinetyFiveResponseTime(url2responseTimes map[string]map[int64]int64, nam
 			}
 		}
 		sort.Float64s(sortedKeys)
-		ninetyFiveResponseTime = stat.Quantile(0.95, stat.Empirical, sortedKeys, nil)
+		ninetyFiveResponseTime = Stat.Quantile(0.95, Stat.Empirical, sortedKeys, nil)
 	}
 	return ninetyFiveResponseTime
 }
@@ -108,7 +108,7 @@ func getNinetyNineResponseTime(url2responseTimes map[string]map[int64]int64, nam
 			}
 		}
 		sort.Float64s(sortedKeys)
-		ninetyNineResponseTime = stat.Quantile(0.99, stat.Empirical, sortedKeys, nil)
+		ninetyNineResponseTime = Stat.Quantile(0.99, Stat.Empirical, sortedKeys, nil)
 	}
 	return ninetyNineResponseTime
 }
