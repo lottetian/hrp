@@ -1,7 +1,6 @@
 package boomer
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -13,7 +12,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/rs/zerolog/log"
-	"gonum.org/v1/gonum/stat"
+
+	"github.com/lottetian/hrp/internal/json"
+	Stat "gonum.org/v1/gonum/stat"
 )
 
 // Output is primarily responsible for printing test results to different destinations
@@ -60,7 +61,7 @@ func getFiftyResponseTime(url2responseTimes map[string]map[int64]int64, name str
 			}
 		}
 		sort.Float64s(sortedKeys)
-		fiftyResponseTime = stat.Quantile(0.50, stat.Empirical, sortedKeys, nil)
+		fiftyResponseTime = Stat.Quantile(0.50, Stat.Empirical, sortedKeys, nil)
 	}
 	return fiftyResponseTime
 }
@@ -76,7 +77,7 @@ func getNinetyResponseTime(url2responseTimes map[string]map[int64]int64, name st
 			}
 		}
 		sort.Float64s(sortedKeys)
-		ninetyResponseTime = stat.Quantile(0.90, stat.Empirical, sortedKeys, nil)
+		ninetyResponseTime = Stat.Quantile(0.90, Stat.Empirical, sortedKeys, nil)
 	}
 	return ninetyResponseTime
 }
@@ -92,7 +93,7 @@ func getNinetyFiveResponseTime(url2responseTimes map[string]map[int64]int64, nam
 			}
 		}
 		sort.Float64s(sortedKeys)
-		ninetyFiveResponseTime = stat.Quantile(0.95, stat.Empirical, sortedKeys, nil)
+		ninetyFiveResponseTime = Stat.Quantile(0.95, Stat.Empirical, sortedKeys, nil)
 	}
 	return ninetyFiveResponseTime
 }
@@ -108,7 +109,7 @@ func getNinetyNineResponseTime(url2responseTimes map[string]map[int64]int64, nam
 			}
 		}
 		sort.Float64s(sortedKeys)
-		ninetyNineResponseTime = stat.Quantile(0.99, stat.Empirical, sortedKeys, nil)
+		ninetyNineResponseTime = Stat.Quantile(0.99, Stat.Empirical, sortedKeys, nil)
 	}
 	return ninetyNineResponseTime
 }
@@ -188,15 +189,15 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 
 	var state string
 	switch output.State {
-	case 1:
+	case stateInit:
 		state = "initializing"
-	case 2:
+	case stateSpawning:
 		state = "spawning"
-	case 3:
+	case stateRunning:
 		state = "running"
-	case 4:
+	case stateQuitting:
 		state = "quitting"
-	case 5:
+	case stateStopped:
 		state = "stopped"
 	}
 
@@ -334,6 +335,10 @@ func deserializeStatsEntry(stat interface{}) (entryOutput *statsEntryOutput, err
 	var duration float64
 	if entry.Name == "Total" {
 		duration = float64(entry.LastRequestTimestamp - entry.StartTime)
+		// fix: avoid divide by zero
+		if duration < 1 {
+			duration = 1
+		}
 	} else {
 		duration = float64(reportStatsInterval / time.Second)
 	}
@@ -410,38 +415,6 @@ var (
 		prometheus.GaugeOpts{
 			Name: "max_response_time",
 			Help: "The max response time",
-		},
-		[]string{"method", "name"},
-	)
-	// added by LotteTian
-	gaugeFiftyResponseTime = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "fifty_response_time",
-			Help: "The 50% response time",
-		},
-		[]string{"method", "name"},
-	)
-	// added by LotteTian
-	gaugeNinetyResponseTime = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "ninety_response_time",
-			Help: "The 90% response time",
-		},
-		[]string{"method", "name"},
-	)
-	// added by LotteTian
-	gaugeNinetyNineResponseTime = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "ninetyNine_response_time",
-			Help: "The 99% response time",
-		},
-		[]string{"method", "name"},
-	)
-	// added by LotteTian
-	gaugeNinetyFiveResponseTime = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "ninetyFive_response_time",
-			Help: "The 95% response time",
 		},
 		[]string{"method", "name"},
 	)
@@ -568,10 +541,6 @@ func (o *PrometheusPusherOutput) OnStart() {
 		gaugeAverageResponseTime,
 		gaugeMinResponseTime,
 		gaugeMaxResponseTime,
-		gaugeFiftyResponseTime,
-		gaugeNinetyResponseTime,
-		gaugeNinetyFiveResponseTime,
-		gaugeNinetyNineResponseTime,
 		gaugeAverageContentLength,
 		gaugeCurrentRPS,
 		gaugeCurrentFailPerSec,
@@ -593,7 +562,11 @@ func (o *PrometheusPusherOutput) OnStart() {
 
 // OnStop of PrometheusPusherOutput has nothing to do.
 func (o *PrometheusPusherOutput) OnStop() {
-
+	// update runner state: stopped
+	gaugeState.Set(float64(stateStopped))
+	if err := o.pusher.Push(); err != nil {
+		log.Error().Err(err).Msg("push to Pushgateway failed")
+	}
 }
 
 // OnEvent will push metric to Prometheus Pushgataway
@@ -632,12 +605,6 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 		gaugeAverageResponseTime.WithLabelValues(method, name).Set(float64(stat.avgResponseTime))
 		gaugeMinResponseTime.WithLabelValues(method, name).Set(float64(stat.MinResponseTime))
 		gaugeMaxResponseTime.WithLabelValues(method, name).Set(float64(stat.MaxResponseTime))
-		// ⬇ added by lotteTian
-		gaugeFiftyResponseTime.WithLabelValues(method, name).Set(float64(stat.fiftyResponseTime))
-		gaugeNinetyResponseTime.WithLabelValues(method, name).Set(float64(stat.ninetyResponseTime))
-		gaugeNinetyFiveResponseTime.WithLabelValues(method, name).Set(float64(stat.ninetyFiveResponseTime))
-		gaugeNinetyNineResponseTime.WithLabelValues(method, name).Set(float64(stat.ninetyNineResponseTime))
-		// ⬆ added by lotteTian
 		gaugeAverageContentLength.WithLabelValues(method, name).Set(float64(stat.avgContentLength))
 		gaugeCurrentRPS.WithLabelValues(method, name).Set(stat.currentRps)
 		gaugeCurrentFailPerSec.WithLabelValues(method, name).Set(stat.currentFailPerSec)

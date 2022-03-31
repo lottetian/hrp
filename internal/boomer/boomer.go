@@ -2,6 +2,9 @@ package boomer
 
 import (
 	"math"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -16,6 +19,9 @@ type Boomer struct {
 
 	memoryProfile         string
 	memoryProfileDuration time.Duration
+
+	disableKeepalive   bool
+	disableCompression bool
 }
 
 // NewStandaloneBoomer returns a new Boomer, which can run without master.
@@ -52,9 +58,28 @@ func (b *Boomer) SetRateLimiter(maxRPS int64, requestIncreaseRate string) {
 	}
 }
 
+// SetDisableKeepAlive disable keep-alive for tcp
+func (b *Boomer) SetDisableKeepAlive(disableKeepalive bool) {
+	b.disableKeepalive = disableKeepalive
+}
+
+// SetDisableCompression disable compression to prevent the Transport from requesting compression with an "Accept-Encoding: gzip"
+func (b *Boomer) SetDisableCompression(disableCompression bool) {
+	b.disableCompression = disableCompression
+}
+
+func (b *Boomer) GetDisableKeepAlive() bool {
+	return b.disableKeepalive
+}
+
+func (b *Boomer) GetDisableCompression() bool {
+	return b.disableCompression
+}
+
 // SetLoopCount set loop count for test.
 func (b *Boomer) SetLoopCount(loopCount int64) {
-	b.localRunner.loop = &Loop{loopCount: loopCount}
+	// total loop count for testcase, it will be evenly distributed to each worker
+	b.localRunner.loop = &Loop{loopCount: loopCount * int64(b.localRunner.spawnCount)}
 }
 
 // AddOutput accepts outputs which implements the boomer.Output interface.
@@ -72,6 +97,16 @@ func (b *Boomer) EnableCPUProfile(cpuProfile string, duration time.Duration) {
 func (b *Boomer) EnableMemoryProfile(memoryProfile string, duration time.Duration) {
 	b.memoryProfile = memoryProfile
 	b.memoryProfileDuration = duration
+}
+
+// EnableGracefulQuit catch SIGINT and SIGTERM signals to quit gracefully
+func (b *Boomer) EnableGracefulQuit() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-c
+		b.Quit()
+	}()
 }
 
 // Run accepts a slice of Task and connects to the locust master.

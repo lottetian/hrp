@@ -1,19 +1,50 @@
 package scaffold
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 
-	"github.com/lottetian/hrp/internal/builtin"
-	"github.com/lottetian/hrp/internal/ga"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+
+	"github.com/httprunner/funplugin/shared"
+	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/sdk"
 )
 
-func CreateScaffold(projectName string) error {
+type PluginType string
+
+const (
+	Ignore PluginType = "ignore"
+	Py     PluginType = "py"
+	Go     PluginType = "go"
+)
+
+//go:embed templates/*
+var templatesDir embed.FS
+
+// CopyFile copies a file from templates dir to scaffold project
+func CopyFile(templateFile, targetFile string) error {
+	log.Info().Str("path", targetFile).Msg("create file")
+	content, err := templatesDir.ReadFile(templateFile)
+	if err != nil {
+		return errors.Wrap(err, "template file not found")
+	}
+
+	err = os.WriteFile(targetFile, content, 0o644)
+	if err != nil {
+		log.Error().Err(err).Msg("create file failed")
+		return err
+	}
+	return nil
+}
+
+func CreateScaffold(projectName string, pluginType PluginType) error {
 	// report event
-	ga.SendEvent(ga.EventTracking{
+	sdk.SendEvent(sdk.EventTracking{
 		Category: "Scaffold",
 		Action:   "hrp startproject",
 	})
@@ -25,42 +56,95 @@ func CreateScaffold(projectName string) error {
 		return fmt.Errorf("project name already exists")
 	}
 
-	log.Info().Str("projectName", projectName).Msg("create new scaffold project")
+	log.Info().
+		Str("projectName", projectName).
+		Str("pluginType", string(pluginType)).
+		Msg("create new scaffold project")
 
 	// create project folders
 	if err := builtin.CreateFolder(projectName); err != nil {
 		return err
 	}
-	if err := builtin.CreateFolder(path.Join(projectName, "har")); err != nil {
+	if err := builtin.CreateFolder(filepath.Join(projectName, "har")); err != nil {
 		return err
 	}
-	if err := builtin.CreateFolder(path.Join(projectName, "testcases")); err != nil {
+	if err := builtin.CreateFile(filepath.Join(projectName, "har", ".keep"), ""); err != nil {
 		return err
 	}
-	pluginDir := path.Join(projectName, "plugin")
-	if err := builtin.CreateFolder(pluginDir); err != nil {
+	if err := builtin.CreateFolder(filepath.Join(projectName, "testcases")); err != nil {
 		return err
 	}
-	if err := builtin.CreateFolder(path.Join(projectName, "reports")); err != nil {
+	if err := builtin.CreateFolder(filepath.Join(projectName, "reports")); err != nil {
+		return err
+	}
+	if err := builtin.CreateFile(filepath.Join(projectName, "reports", ".keep"), ""); err != nil {
+		return err
+	}
+
+	// create .gitignore
+	err := CopyFile("templates/gitignore", filepath.Join(projectName, ".gitignore"))
+	if err != nil {
+		return err
+	}
+	// create .env
+	err = CopyFile("templates/env", filepath.Join(projectName, ".env"))
+	if err != nil {
 		return err
 	}
 
 	// create demo testcases
-	tCase, _ := demoTestCase.ToTCase()
-	err := builtin.Dump2JSON(tCase, path.Join(projectName, "testcases", "demo.json"))
+	if pluginType == Ignore {
+		err := CopyFile("templates/testcases/demo_without_funplugin.json",
+			filepath.Join(projectName, "testcases", "demo_without_funplugin.json"))
+		if err != nil {
+			return err
+		}
+		log.Info().Msg("skip creating function plugin")
+		return nil
+	}
+
+	err = CopyFile("templates/testcases/demo_with_funplugin.json",
+		filepath.Join(projectName, "testcases", "demo_with_funplugin.json"))
 	if err != nil {
-		log.Error().Err(err).Msg("create demo.json testcase failed")
 		return err
 	}
-	err = builtin.Dump2YAML(tCase, path.Join(projectName, "testcases", "demo.yaml"))
+	err = CopyFile("templates/testcases/demo_requests.yml",
+		filepath.Join(projectName, "testcases", "demo_requests.yml"))
 	if err != nil {
-		log.Error().Err(err).Msg("create demo.yml testcase failed")
+		return err
+	}
+	err = CopyFile("templates/testcases/demo_ref_testcase.yml",
+		filepath.Join(projectName, "testcases", "demo_ref_testcase.yml"))
+	if err != nil {
 		return err
 	}
 
+	// create debugtalk function plugin
+	switch pluginType {
+	case Py:
+		return createPythonPlugin(projectName)
+	case Go:
+		return createGoPlugin(projectName)
+	}
+
+	return nil
+}
+
+func createGoPlugin(projectName string) error {
+	log.Info().Msg("start to create hashicorp go plugin")
+	// check go sdk
+	if err := builtin.ExecCommand(exec.Command("go", "version"), projectName); err != nil {
+		return errors.Wrap(err, "go sdk not installed")
+	}
+
 	// create debugtalk.go
-	pluginFile := path.Join(pluginDir, "debugtalk.go")
-	if err := builtin.CreateFile(pluginFile, demoPlugin); err != nil {
+	pluginDir := filepath.Join(projectName, "plugin")
+	if err := builtin.CreateFolder(pluginDir); err != nil {
+		return err
+	}
+	err := CopyFile("templates/plugin/debugtalk.go",
+		filepath.Join(projectName, "plugin", "debugtalk.go"))
+	if err != nil {
 		return err
 	}
 
@@ -70,22 +154,39 @@ func CreateScaffold(projectName string) error {
 	}
 
 	// download plugin dependency
-	if err := builtin.ExecCommand(exec.Command("go", "get", "github.com/httprunner/plugin"), pluginDir); err != nil {
+	// funplugin version should be locked
+	funplugin := fmt.Sprintf("github.com/httprunner/funplugin@%s", shared.Version)
+	if err := builtin.ExecCommand(exec.Command("go", "get", funplugin), pluginDir); err != nil {
 		return err
 	}
 
 	// build plugin debugtalk.bin
-	if err := builtin.ExecCommand(exec.Command("go", "build", "-o", path.Join("..", "debugtalk.bin"), "debugtalk.go"), pluginDir); err != nil {
+	if err := builtin.ExecCommand(exec.Command("go", "build", "-o", filepath.Join("..", "debugtalk.bin"), "debugtalk.go"), pluginDir); err != nil {
 		return err
 	}
 
-	// create .gitignore
-	if err := builtin.CreateFile(path.Join(projectName, ".gitignore"), demoIgnoreContent); err != nil {
-		return err
+	return nil
+}
+
+func createPythonPlugin(projectName string) error {
+	log.Info().Msg("start to create hashicorp python plugin")
+
+	// create debugtalk.py
+	pluginFile := filepath.Join(projectName, "debugtalk.py")
+	err := CopyFile("templates/plugin/debugtalk.py", pluginFile)
+	if err != nil {
+		return errors.Wrap(err, "copy file failed")
 	}
-	// create .env
-	if err := builtin.CreateFile(path.Join(projectName, ".env"), demoEnvContent); err != nil {
-		return err
+
+	// create python venv
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return errors.Wrap(err, "get user home dir failed")
+	}
+	venvDir := filepath.Join(home, ".hrp", "venv")
+	_, err = shared.EnsurePython3Venv(venvDir)
+	if err != nil {
+		return errors.Wrap(err, "ensure python venv failed")
 	}
 
 	return nil

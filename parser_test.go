@@ -1,6 +1,7 @@
 package hrp
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -162,7 +163,7 @@ func TestParseDataStringWithVariables(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		parsedData, err := parser.parseData(data.expr, variablesMapping)
+		parsedData, err := parser.Parse(data.expr, variablesMapping)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -187,7 +188,7 @@ func TestParseDataStringWithUndefinedVariables(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		parsedData, err := parser.parseData(data.expr, variablesMapping)
+		parsedData, err := parser.Parse(data.expr, variablesMapping)
 		if !assert.Error(t, err) {
 			t.Fail()
 		}
@@ -232,7 +233,7 @@ func TestParseDataStringWithVariablesAbnormal(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		parsedData, err := parser.parseData(data.expr, variablesMapping)
+		parsedData, err := parser.Parse(data.expr, variablesMapping)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -263,7 +264,7 @@ func TestParseDataMapWithVariables(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		parsedData, err := parser.parseData(data.expr, variablesMapping)
+		parsedData, err := parser.Parse(data.expr, variablesMapping)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -297,7 +298,7 @@ func TestParseHeaders(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		parsedHeaders, err := parser.parseHeaders(data.rawHeaders, variablesMapping)
+		parsedHeaders, err := parser.ParseHeaders(data.rawHeaders, variablesMapping)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -333,18 +334,124 @@ func TestMergeVariables(t *testing.T) {
 	}
 }
 
+func TestMergeMap(t *testing.T) {
+	testData := []struct {
+		m             map[string]string
+		overriddenMap map[string]string
+		expectMap     map[string]string
+	}{
+		{
+			map[string]string{"Accept": "*/*", "Accept-Encoding": "gzip, deflate, br", "Connection": "close"},
+			map[string]string{"Cache-Control": "no-cache", "Connection": "keep-alive"},
+			map[string]string{"Accept": "*/*", "Accept-Encoding": "gzip, deflate, br", "Connection": "close", "Cache-Control": "no-cache"},
+		},
+		{
+			map[string]string{"Host": "postman-echo.com", "Postman-Token": "ea19464c-ddd4-4724-abe9-5e2b254c2723"},
+			map[string]string{"Host": "Postman-echo.com", "Connection": "keep-alive", "Postman-Token": "ea19464c-ddd4-4724-abe9-5e2b342c2723"},
+			map[string]string{"Host": "postman-echo.com", "Postman-Token": "ea19464c-ddd4-4724-abe9-5e2b254c2723", "Connection": "keep-alive"},
+		},
+		{
+			map[string]string{"Accept": "*/*", "Accept-Encoding": "gzip, deflate, br", "Connection": "close"},
+			nil,
+			map[string]string{"Accept": "*/*", "Accept-Encoding": "gzip, deflate, br", "Connection": "close"},
+		},
+		{
+			nil,
+			map[string]string{"Cache-Control": "no-cache", "Connection": "keep-alive"},
+			map[string]string{"Cache-Control": "no-cache", "Connection": "keep-alive"},
+		},
+	}
+
+	for _, data := range testData {
+		mergedMap := mergeMap(data.m, data.overriddenMap)
+		if !assert.Equal(t, data.expectMap, mergedMap) {
+			t.Fail()
+		}
+	}
+}
+
+func TestMergeSlices(t *testing.T) {
+	testData := []struct {
+		slice           []string
+		overriddenSlice []string
+		expectSlice     []string
+	}{
+		{
+			[]string{"${setup_hook_example1($name)}", "${setup_hook_example2($name)}"},
+			[]string{"${setup_hook_example3($name)}", "${setup_hook_example4($name)}"},
+			[]string{"${setup_hook_example1($name)}", "${setup_hook_example2($name)}", "${setup_hook_example3($name)}", "${setup_hook_example4($name)}"},
+		},
+		{
+			[]string{"${setup_hook_example1($name)}", "${setup_hook_example2($name)}"},
+			nil,
+			[]string{"${setup_hook_example1($name)}", "${setup_hook_example2($name)}"},
+		},
+		{
+			nil,
+			[]string{"${setup_hook_example3($name)}", "${setup_hook_example4($name)}"},
+			[]string{"${setup_hook_example3($name)}", "${setup_hook_example4($name)}"},
+		},
+	}
+
+	for _, data := range testData {
+		mergedSlice := mergeSlices(data.slice, data.overriddenSlice)
+		if !assert.Equal(t, data.expectSlice, mergedSlice) {
+			t.Fail()
+		}
+	}
+}
+
+func TestMergeValidators(t *testing.T) {
+	testData := []struct {
+		validators           []interface{}
+		overriddenValidators []interface{}
+		expectValidators     []interface{}
+	}{
+		{
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 200, Message: "assert response status code"}},
+			[]interface{}{Validator{Check: `headers."Content-Type"`, Assert: "equals", Expect: "application/json; charset=utf-8", Message: "assert response header Content-Typ"}},
+			[]interface{}{
+				Validator{Check: "status_code", Assert: "equals", Expect: 200, Message: "assert response status code"},
+				Validator{Check: `headers."Content-Type"`, Assert: "equals", Expect: "application/json; charset=utf-8", Message: "assert response header Content-Typ"},
+			},
+		},
+		{
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 302, Message: "assert response status code"}},
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 200, Message: "assert response status code"}},
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 302, Message: "assert response status code"}},
+		},
+		{
+			nil,
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 200, Message: "assert response status code"}},
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 200, Message: "assert response status code"}},
+		},
+		{
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 302, Message: "assert response status code"}},
+			nil,
+			[]interface{}{Validator{Check: "status_code", Assert: "equals", Expect: 302, Message: "assert response status code"}},
+		},
+	}
+
+	for _, data := range testData {
+		mergedValidators := mergeValidators(data.validators, data.overriddenValidators)
+		if !assert.Equal(t, data.expectValidators, mergedValidators) {
+			t.Fail()
+		}
+	}
+}
+
 func TestCallBuiltinFunction(t *testing.T) {
 	parser := newParser()
 
 	// call function without arguments
-	_, err := parser.callFunc("get_timestamp")
+	_, err := parser.CallFunc("get_timestamp")
 	if !assert.NoError(t, err) {
 		t.Fail()
 	}
 
 	// call function with one argument
 	timeStart := time.Now()
-	_, err = parser.callFunc("sleep", 1)
+	_, err = parser.CallFunc("sleep", 1)
 	if !assert.NoError(t, err) {
 		t.Fail()
 	}
@@ -353,7 +460,7 @@ func TestCallBuiltinFunction(t *testing.T) {
 	}
 
 	// call function with one argument
-	result, err := parser.callFunc("gen_random_string", 10)
+	result, err := parser.CallFunc("gen_random_string", 10)
 	if !assert.NoError(t, err) {
 		t.Fail()
 	}
@@ -362,7 +469,7 @@ func TestCallBuiltinFunction(t *testing.T) {
 	}
 
 	// call function with two argument
-	result, err = parser.callFunc("max", float64(10), 9.99)
+	result, err = parser.CallFunc("max", float64(10), 9.99)
 	if !assert.NoError(t, err) {
 		t.Fail()
 	}
@@ -449,7 +556,7 @@ func TestParseDataStringWithFunctions(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData1 {
-		value, err := parser.parseData(data.expr, variablesMapping)
+		value, err := parser.Parse(data.expr, variablesMapping)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -468,7 +575,7 @@ func TestParseDataStringWithFunctions(t *testing.T) {
 	}
 
 	for _, data := range testData2 {
-		value, err := parser.parseData(data.expr, variablesMapping)
+		value, err := parser.Parse(data.expr, variablesMapping)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -516,7 +623,7 @@ func TestParseVariables(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		value, err := parser.parseVariables(data.rawVars)
+		value, err := parser.ParseVariables(data.rawVars)
 		if !assert.NoError(t, err) {
 			t.Fail()
 		}
@@ -547,7 +654,7 @@ func TestParseVariablesAbnormal(t *testing.T) {
 
 	parser := newParser()
 	for _, data := range testData {
-		value, err := parser.parseVariables(data.rawVars)
+		value, err := parser.ParseVariables(data.rawVars)
 		if !assert.Error(t, err) {
 			t.Fail()
 		}
@@ -636,7 +743,7 @@ func TestParseParameters(t *testing.T) {
 	}{
 		{
 			map[string]interface{}{
-				"username-password": "${parameterize(examples/account.csv)}",
+				"username-password": fmt.Sprintf("${parameterize(%s/account.csv)}", hrpExamplesDir),
 				"user_agent":        []interface{}{"IOS/10.1", "IOS/10.2"}},
 			6,
 		},
@@ -676,17 +783,17 @@ func TestParseParametersError(t *testing.T) {
 	}{
 		{
 			map[string]interface{}{
-				"username_password": "${parameterize(examples/account.csv)}",
+				"username_password": fmt.Sprintf("${parameterize(%s/account.csv)}", hrpExamplesDir),
 				"user_agent":        []interface{}{"IOS/10.1", "IOS/10.2"}},
 		},
 		{
 			map[string]interface{}{
-				"username-password": "${parameterize(examples/account.csv)}",
+				"username-password": fmt.Sprintf("${parameterize(%s/account.csv)}", hrpExamplesDir),
 				"user-agent":        []interface{}{"IOS/10.1", "IOS/10.2"}},
 		},
 		{
 			map[string]interface{}{
-				"username-password": "${param(examples/account.csv)}",
+				"username-password": fmt.Sprintf("${param(%s/account.csv)}", hrpExamplesDir),
 				"user_agent":        []interface{}{"IOS/10.1", "IOS/10.2"}},
 		},
 	}

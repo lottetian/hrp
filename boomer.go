@@ -7,9 +7,9 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/rs/zerolog/log"
 
-	pluginInternal "github.com/httprunner/plugin/go"
+	"github.com/httprunner/funplugin"
 	"github.com/lottetian/hrp/internal/boomer"
-	"github.com/lottetian/hrp/internal/ga"
+	"github.com/lottetian/hrp/internal/sdk"
 )
 
 func NewBoomer(spawnCount int, spawnRate float64) *HRPBoomer {
@@ -22,8 +22,8 @@ func NewBoomer(spawnCount int, spawnRate float64) *HRPBoomer {
 
 type HRPBoomer struct {
 	*boomer.Boomer
-	plugins      []pluginInternal.IPlugin // each task has its own plugin process
-	pluginsMutex *sync.RWMutex            // avoid data race
+	plugins      []funplugin.IPlugin // each task has its own plugin process
+	pluginsMutex *sync.RWMutex       // avoid data race
 }
 
 // NewConsoleOutput returns a ConsoleOutput.
@@ -33,21 +33,24 @@ func (b *HRPBoomer) NewConsoleOutput() *boomer.ConsoleOutput {
 
 // Run starts to run load test for one or multiple testcases.
 func (b *HRPBoomer) Run(testcases ...ITestCase) {
-	event := ga.EventTracking{
+	event := sdk.EventTracking{
 		Category: "RunLoadTests",
 		Action:   "hrp boom",
 	}
 	// report start event
-	go ga.SendEvent(event)
+	go sdk.SendEvent(event)
 	// report execution timing event
-	defer ga.SendEvent(event.StartTiming("execution"))
+	defer sdk.SendEvent(event.StartTiming("execution"))
 
 	var taskSlice []*boomer.Task
-	for _, iTestCase := range testcases {
-		testcase, err := iTestCase.ToTestCase()
-		if err != nil {
-			panic(err)
-		}
+
+	// load all testcases
+	testCases, err := loadTestCases(testcases...)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, testcase := range testCases {
 		cfg := testcase.Config
 		err = initParameterIterator(cfg, "boomer")
 		if err != nil {
@@ -73,6 +76,8 @@ func (b *HRPBoomer) Quit() {
 
 func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rendezvous) *boomer.Task {
 	hrpRunner := NewRunner(nil)
+	// set client transport for high concurrency load testing
+	hrpRunner.SetClientTransport(b.GetSpawnCount(), b.GetDisableKeepAlive(), b.GetDisableCompression())
 	config := testcase.Config
 
 	// each testcase has its own plugin process
@@ -95,47 +100,47 @@ func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rend
 		Name:   config.Name,
 		Weight: config.Weight,
 		Fn: func() {
-			runner := hrpRunner.newCaseRunner(testcase)
-			runner.parser.plugin = plugin
+			sessionTestCase := &TestCase{}
+			// copy testcase to avoid data racing
+			if err := copier.Copy(sessionTestCase, testcase); err != nil {
+				log.Error().Err(err).Msg("copy testcase data failed")
+				return
+			}
+			sessionRunner := hrpRunner.NewSessionRunner(sessionTestCase)
+			sessionRunner.parser.plugin = plugin
 
 			testcaseSuccess := true       // flag whole testcase result
 			var transactionSuccess = true // flag current transaction result
 
-			cfg := testcase.Config
-			caseConfig := &TConfig{}
-			// copy config to avoid data racing
-			if err := copier.Copy(caseConfig, cfg); err != nil {
-				log.Error().Err(err).Msg("copy config data failed")
-				return
-			}
+			cfg := sessionTestCase.Config
 			// iterate through all parameter iterators and update case variables
-			for _, it := range caseConfig.ParametersSetting.Iterators {
+			for _, it := range cfg.ParametersSetting.Iterators {
 				if it.HasNext() {
-					caseConfig.Variables = mergeVariables(it.Next(), caseConfig.Variables)
+					cfg.Variables = mergeVariables(it.Next(), cfg.Variables)
 				}
 			}
 
-			if err := runner.parseConfig(caseConfig); err != nil {
+			if err := sessionRunner.parseConfig(cfg); err != nil {
 				log.Error().Err(err).Msg("parse config failed")
 				return
 			}
 
 			startTime := time.Now()
-			for index, step := range testcase.TestSteps {
-				stepData, err := runner.runStep(index, caseConfig)
+			for _, step := range testcase.TestSteps {
+				stepResult, err := step.Run(sessionRunner)
 				if err != nil {
 					// step failed
 					var elapsed int64
-					if stepData != nil {
-						elapsed = stepData.Elapsed
+					if stepResult != nil {
+						elapsed = stepResult.Elapsed
 					}
-					b.RecordFailure(step.Type(), step.Name(), elapsed, err.Error())
+					b.RecordFailure(string(step.Type()), step.Name(), elapsed, err.Error())
 
 					// update flag
 					testcaseSuccess = false
 					transactionSuccess = false
 
-					if runner.hrpRunner.failfast {
+					if hrpRunner.failfast {
 						log.Error().Msg("abort running due to failfast setting")
 						break
 					}
@@ -144,25 +149,27 @@ func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rend
 				}
 
 				// step success
-				if stepData.StepType == stepTypeTransaction {
+				if stepResult.StepType == stepTypeTransaction {
 					// transaction
 					// FIXME: support nested transactions
-					if step.ToStruct().Transaction.Type == transactionEnd { // only record when transaction ends
-						b.RecordTransaction(stepData.Name, transactionSuccess, stepData.Elapsed, 0)
+					if step.Struct().Transaction.Type == transactionEnd { // only record when transaction ends
+						b.RecordTransaction(stepResult.Name, transactionSuccess, stepResult.Elapsed, 0)
 						transactionSuccess = true // reset flag for next transaction
 					}
-				} else if stepData.StepType == stepTypeRendezvous {
+				} else if stepResult.StepType == stepTypeRendezvous {
 					// rendezvous
-					// TODO: implement rendezvous in boomer
+				} else if stepResult.StepType == stepTypeThinkTime {
+					// think time
+					// no record required
 				} else {
 					// request or testcase step
-					b.RecordSuccess(step.Type(), step.Name(), stepData.Elapsed, stepData.ContentSize)
+					b.RecordSuccess(string(step.Type()), step.Name(), stepResult.Elapsed, stepResult.ContentSize)
 				}
 			}
 			endTime := time.Now()
 
 			// report duration for transaction without end
-			for name, transaction := range runner.transactions {
+			for name, transaction := range sessionRunner.transactions {
 				if len(transaction) == 1 {
 					// if transaction end time not exists, use testcase end time instead
 					duration := endTime.Sub(transaction[transactionStart])
