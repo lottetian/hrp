@@ -1,8 +1,9 @@
 package boomer
 
 import (
-	"encoding/json"
 	"time"
+
+	"github.com/lottetian/hrp/internal/json"
 )
 
 type transaction struct {
@@ -129,7 +130,7 @@ func (s *requestStats) serializeStats() []interface{} {
 	entries := make([]interface{}, 0, len(s.entries))
 	for _, v := range s.entries {
 		if !(v.NumRequests == 0 && v.NumFailures == 0) {
-			entries = append(entries, v.getStrippedReport())
+			entries = append(entries, v.getAccumulativeReport())
 		}
 	}
 	return entries
@@ -317,7 +318,7 @@ func (s *statsEntry) serialize() map[string]interface{} {
 
 func (s *statsEntry) getStrippedReport() map[string]interface{} {
 	report := s.serialize()
-	//s.reset()
+	s.reset()
 	return report
 }
 
