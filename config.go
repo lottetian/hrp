@@ -33,6 +33,12 @@ type TConfig struct {
 	Path              string                 `json:"path,omitempty" yaml:"path,omitempty"` // testcase file path
 }
 
+// SetPluginPath sets plugin path for current testcase.
+func (c *TConfig) SetPluginPath(plugin string) *TConfig {
+	c.Path = plugin
+	return c
+}
+
 // WithVariables sets variables for current testcase.
 func (c *TConfig) WithVariables(variables map[string]interface{}) *TConfig {
 	c.Variables = variables
