@@ -2,7 +2,6 @@ package hrp
 
 import (
 	"fmt"
-
 	"github.com/rs/zerolog/log"
 
 	"github.com/lottetian/hrp/internal/builtin"
@@ -99,7 +98,7 @@ func (s *StepAPIWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error) {
 	api, _ := s.step.API.(*API)
 	extendWithAPI(s.step, api)
 
-	stepResult, err := runStepRequest(r, s.step)
+	stepResult, err := runStepRequestWithTimes(r, s.step)
 	if err != nil {
 		r.summary.Success = false
 		return nil, err

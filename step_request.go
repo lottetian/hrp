@@ -243,8 +243,6 @@ func (r *requestBuilder) prepareBody(stepVariables map[string]interface{}) error
 }
 
 func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
-	log.Info().Str("step", step.Name).Msg("run step start")
-
 	stepResult = &StepResult{
 		Name:        step.Name,
 		StepType:    stepTypeRequest,
@@ -385,6 +383,23 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	return stepResult, err
 }
 
+func runStepRequestWithTimes(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
+	fmt.Println("step times is ", step.Times)
+	times, err := strconv.Atoi(step.Times)
+	if err != nil {
+		log.Info().Str("step", step.Name).Msg("run step start")
+		return runStepRequest(r, step)
+	}
+	for i := 0; i < times; i++ {
+		log.Info().Str("step", step.Name).Msg("run step start at " + strconv.Itoa(i+1) + " times")
+		stepResult, err := runStepRequest(r, step)
+		if err == nil {
+			return stepResult, nil
+		}
+	}
+	return stepResult, err
+}
+
 func printRequest(req *http.Request) error {
 	reqContentType := req.Header.Get("Content-Type")
 	printBody := shouldPrintBody(reqContentType)
@@ -480,6 +495,14 @@ func (s *StepRequest) WithVariables(variables map[string]interface{}) *StepReque
 func (s *StepRequest) SetupHook(hook string) *StepRequest {
 	s.step.SetupHooks = append(s.step.SetupHooks, hook)
 	return s
+}
+
+// SetTimes sets running times.
+func (s *StepRequest) SetTimes(times string) *StepRequest {
+	s.step.Times = times
+	return &StepRequest{
+		step: s.step,
+	}
 }
 
 // GET makes a HTTP GET request.
@@ -713,7 +736,7 @@ func (s *StepRequestWithOptionalArgs) Struct() *TStep {
 }
 
 func (s *StepRequestWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error) {
-	return runStepRequest(r, s.step)
+	return runStepRequestWithTimes(r, s.step)
 }
 
 // StepRequestExtraction implements IStep interface.
@@ -747,7 +770,7 @@ func (s *StepRequestExtraction) Struct() *TStep {
 }
 
 func (s *StepRequestExtraction) Run(r *SessionRunner) (*StepResult, error) {
-	return runStepRequest(r, s.step)
+	return runStepRequestWithTimes(r, s.step)
 }
 
 // StepRequestValidation implements IStep interface.
@@ -771,7 +794,7 @@ func (s *StepRequestValidation) Struct() *TStep {
 }
 
 func (s *StepRequestValidation) Run(r *SessionRunner) (*StepResult, error) {
-	return runStepRequest(r, s.step)
+	return runStepRequestWithTimes(r, s.step)
 }
 
 func (s *StepRequestValidation) AssertEqual(jmesPath string, expected interface{}, msg string) *StepRequestValidation {
