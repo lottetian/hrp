@@ -31,9 +31,13 @@ func TestBoomerStandaloneRun(t *testing.T) {
 	}
 	testcase2 := &demoTestCaseWithPluginJSONPath
 
-	b := NewBoomer(2, 1)
+	b := NewBoomer(1000, 200)
 	b.AddOutput(b.NewConsoleOutput())
 	b.Run(testcase1, testcase2)
+	//err2 := Run(testcase1, testcase2)
+	//if err2 != nil {
+	//	t.Logf("testcase is failed: %s", err2)
+	//}
 	//time.Sleep(5 * time.Second)
 	//b.Quit()
 }

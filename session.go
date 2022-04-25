@@ -1,7 +1,10 @@
 package hrp
 
 import (
+	"crypto/tls"
 	_ "embed"
+	"golang.org/x/net/http2"
+	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -34,6 +37,22 @@ func (r *SessionRunner) resetSession() {
 	r.closeResponseChan = make(chan *wsCloseRespObject, 1)
 }
 
+func (r *SessionRunner) resetHttpClient() {
+	log.Info().Msg("reset step http client")
+	r.hrpRunner.httpClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		Timeout: 30 * time.Second,
+	}
+	r.hrpRunner.http2Client = &http.Client{
+		Transport: &http2.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		Timeout: 30 * time.Second,
+	}
+}
+
 func (r *SessionRunner) GetParser() *Parser {
 	return r.parser
 }
@@ -62,6 +81,9 @@ func (r *SessionRunner) Start(givenVars map[string]interface{}) error {
 	for _, step := range r.testCase.TestSteps {
 		log.Info().Str("step", step.Name()).
 			Str("type", string(step.Type())).Msg("run step start")
+
+		// reset step http client
+		r.resetHttpClient()
 
 		stepResult, err := step.Run(r)
 		if err != nil {
