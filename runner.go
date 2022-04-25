@@ -2,17 +2,18 @@ package hrp
 
 import (
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+	"github.com/jinzhu/copier"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/http2"
 
-	"github.com/lottetian/hrp/internal/builtin"
 	"github.com/lottetian/hrp/internal/sdk"
 )
 
@@ -31,11 +32,21 @@ func NewRunner(t *testing.T) *HRPRunner {
 		t:             t,
 		failfast:      true, // default to failfast
 		genHTMLReport: false,
-		client: &http.Client{
+		httpClient: &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			},
 			Timeout: 30 * time.Second,
+		},
+		http2Client: &http.Client{
+			Transport: &http2.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+			Timeout: 30 * time.Second,
+		},
+		// use default handshake timeout (no timeout limit) here, enable timeout at step level
+		wsDialer: &websocket.Dialer{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
 }
@@ -47,13 +58,19 @@ type HRPRunner struct {
 	pluginLogOn   bool
 	saveTests     bool
 	genHTMLReport bool
-	client        *http.Client
+	httpClient    *http.Client
+	http2Client   *http.Client
+	wsDialer      *websocket.Dialer
 }
 
 // SetClientTransport configures transport of http client for high concurrency load testing
 func (r *HRPRunner) SetClientTransport(maxConns int, disableKeepAlive bool, disableCompression bool) *HRPRunner {
-	log.Info().Int("maxConns", maxConns).Msg("[init] SetClientTransport")
-	r.client.Transport = &http.Transport{
+	log.Info().
+		Int("maxConns", maxConns).
+		Bool("disableKeepAlive", disableKeepAlive).
+		Bool("disableCompression", disableCompression).
+		Msg("[init] SetClientTransport")
+	r.httpClient.Transport = &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		DialContext:         (&net.Dialer{}).DialContext,
 		MaxIdleConns:        0,
@@ -61,6 +78,11 @@ func (r *HRPRunner) SetClientTransport(maxConns int, disableKeepAlive bool, disa
 		DisableKeepAlives:   disableKeepAlive,
 		DisableCompression:  disableCompression,
 	}
+	r.http2Client.Transport = &http2.Transport{
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+		DisableCompression: disableCompression,
+	}
+	r.wsDialer.EnableCompression = !disableCompression
 	return r
 }
 
@@ -93,10 +115,11 @@ func (r *HRPRunner) SetProxyUrl(proxyUrl string) *HRPRunner {
 		log.Error().Err(err).Str("proxyUrl", proxyUrl).Msg("[init] invalid proxyUrl")
 		return r
 	}
-	r.client.Transport = &http.Transport{
+	r.httpClient.Transport = &http.Transport{
 		Proxy:           http.ProxyURL(p),
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
+	r.wsDialer.Proxy = http.ProxyURL(p)
 	return r
 }
 
@@ -128,30 +151,27 @@ func (r *HRPRunner) Run(testcases ...ITestCase) error {
 	s := newOutSummary()
 
 	// load all testcases
-	testCases, err := loadTestCases(testcases...)
+	testCases, err := LoadTestCases(testcases...)
 	if err != nil {
+		log.Error().Err(err).Msg("failed to load testcases")
 		return err
 	}
 
 	// run testcase one by one
 	for _, testcase := range testCases {
-		cfg := testcase.Config
-		// parse config parameters
-		err := initParameterIterator(cfg, "runner")
+		sessionRunner, err := r.NewSessionRunner(testcase)
 		if err != nil {
-			log.Error().Interface("parameters", cfg.Parameters).Err(err).Msg("parse config parameters failed")
+			log.Error().Err(err).Msg("[Run] init session runner failed")
 			return err
 		}
-		// 在runner模式下，指定整体策略，cfg.ParametersSetting.Iterators仅包含一个CartesianProduct的迭代器
-		for it := cfg.ParametersSetting.Iterators[0]; it.HasNext(); {
-			// iterate through all parameter iterators and update case variables
-			for _, it := range cfg.ParametersSetting.Iterators {
-				if it.HasNext() {
-					cfg.Variables = mergeVariables(it.Next(), cfg.Variables)
-				}
+		defer func() {
+			if sessionRunner.parser.plugin != nil {
+				sessionRunner.parser.plugin.Quit()
 			}
-			sessionRunner := r.NewSessionRunner(testcase)
-			if err = sessionRunner.Start(); err != nil {
+		}()
+
+		for it := sessionRunner.parametersIterator; it.HasNext(); {
+			if err = sessionRunner.Start(it.Next()); err != nil {
 				log.Error().Err(err).Msg("[Run] run testcase failed")
 				return err
 			}
@@ -163,12 +183,7 @@ func (r *HRPRunner) Run(testcases ...ITestCase) error {
 
 	// save summary
 	if r.saveTests {
-		dir, _ := filepath.Split(summaryPath)
-		err := builtin.EnsureFolderExists(dir)
-		if err != nil {
-			return err
-		}
-		err = builtin.Dump2JSON(s, fmt.Sprintf(summaryPath, s.Time.StartAt.Unix()))
+		err := s.genSummary()
 		if err != nil {
 			return err
 		}
@@ -184,13 +199,112 @@ func (r *HRPRunner) Run(testcases ...ITestCase) error {
 	return nil
 }
 
-func (r *HRPRunner) NewSessionRunner(testcase *TestCase) *SessionRunner {
+// NewSessionRunner creates a new session runner for testcase.
+// each testcase has its own session runner
+func (r *HRPRunner) NewSessionRunner(testcase *TestCase) (*SessionRunner, error) {
+	runner, err := r.newCaseRunner(testcase)
+	if err != nil {
+		return nil, err
+	}
+
 	sessionRunner := &SessionRunner{
+		testCaseRunner: runner,
+	}
+	sessionRunner.resetSession()
+	return sessionRunner, nil
+}
+
+func (r *HRPRunner) newCaseRunner(testcase *TestCase) (*testCaseRunner, error) {
+	runner := &testCaseRunner{
 		testCase:  testcase,
 		hrpRunner: r,
 		parser:    newParser(),
-		summary:   newSummary(),
 	}
-	sessionRunner.init()
+
+	// init parser plugin
+	plugin, pluginDir, err := initPlugin(testcase.Config.Path, r.pluginLogOn)
+	if err != nil {
+		return nil, errors.Wrap(err, "init plugin failed")
+	}
+	runner.parser.plugin = plugin
+	runner.rootDir = pluginDir
+
+	// parse testcase config
+	if err := runner.parseConfig(); err != nil {
+		return nil, errors.Wrap(err, "parse testcase config failed")
+	}
+
+	return runner, nil
+}
+
+type testCaseRunner struct {
+	testCase           *TestCase
+	hrpRunner          *HRPRunner
+	parser             *Parser
+	parsedConfig       *TConfig
+	parametersIterator *ParametersIterator
+	rootDir            string // project root dir
+}
+
+// parseConfig parses testcase config, stores to parsedConfig.
+func (r *testCaseRunner) parseConfig() error {
+	cfg := r.testCase.Config
+
+	r.parsedConfig = &TConfig{}
+	// deep copy config to avoid data racing
+	if err := copier.Copy(r.parsedConfig, cfg); err != nil {
+		log.Error().Err(err).Msg("copy testcase config failed")
+		return err
+	}
+
+	// parse config variables
+	parsedVariables, err := r.parser.ParseVariables(cfg.Variables)
+	if err != nil {
+		log.Error().Interface("variables", cfg.Variables).Err(err).Msg("parse config variables failed")
+		return err
+	}
+	r.parsedConfig.Variables = parsedVariables
+
+	// parse config name
+	parsedName, err := r.parser.ParseString(cfg.Name, parsedVariables)
+	if err != nil {
+		return errors.Wrap(err, "parse config name failed")
+	}
+	r.parsedConfig.Name = convertString(parsedName)
+
+	// parse config base url
+	parsedBaseURL, err := r.parser.ParseString(cfg.BaseURL, parsedVariables)
+	if err != nil {
+		return errors.Wrap(err, "parse config base url failed")
+	}
+	r.parsedConfig.BaseURL = convertString(parsedBaseURL)
+
+	// ensure correction of think time config
+	r.parsedConfig.ThinkTimeSetting.checkThinkTime()
+
+	// ensure correction of websocket config
+	r.parsedConfig.WebSocketSetting.checkWebSocket()
+
+	// parse testcase config parameters
+	parametersIterator, err := initParametersIterator(r.parsedConfig)
+	if err != nil {
+		log.Error().Err(err).
+			Interface("parameters", r.parsedConfig.Parameters).
+			Interface("parametersSetting", r.parsedConfig.ParametersSetting).
+			Msg("parse config parameters failed")
+		return errors.Wrap(err, "parse testcase config parameters failed")
+	}
+	r.parametersIterator = parametersIterator
+
+	return nil
+}
+
+// each boomer task initiates a new session
+// in order to avoid data racing
+func (r *testCaseRunner) newSession() *SessionRunner {
+	sessionRunner := &SessionRunner{
+		testCaseRunner: r,
+	}
+	sessionRunner.resetSession()
 	return sessionRunner
 }

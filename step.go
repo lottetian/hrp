@@ -9,6 +9,7 @@ const (
 	stepTypeTransaction StepType = "transaction"
 	stepTypeRendezvous  StepType = "rendezvous"
 	stepTypeThinkTime   StepType = "thinktime"
+	stepTypeWebSocket   StepType = "websocket"
 )
 
 type StepResult struct {
@@ -32,19 +33,20 @@ type TStep struct {
 	Transaction   *Transaction           `json:"transaction,omitempty" yaml:"transaction,omitempty"`
 	Rendezvous    *Rendezvous            `json:"rendezvous,omitempty" yaml:"rendezvous,omitempty"`
 	ThinkTime     *ThinkTime             `json:"think_time,omitempty" yaml:"think_time,omitempty"`
+	WebSocket     *WebSocketAction       `json:"websocket,omitempty" yaml:"websocket,omitempty"`
+	Times         string                 `json:"times,omitempty" yaml:"times,omitempty"`
 	Variables     map[string]interface{} `json:"variables,omitempty" yaml:"variables,omitempty"`
 	SetupHooks    []string               `json:"setup_hooks,omitempty" yaml:"setup_hooks,omitempty"`
 	TeardownHooks []string               `json:"teardown_hooks,omitempty" yaml:"teardown_hooks,omitempty"`
 	Extract       map[string]string      `json:"extract,omitempty" yaml:"extract,omitempty"`
 	Validators    []interface{}          `json:"validate,omitempty" yaml:"validate,omitempty"`
 	Export        []string               `json:"export,omitempty" yaml:"export,omitempty"`
-	Times         string                 `json:"times,omitempty" yaml:"times,omitempty"`
 }
 
 // IStep represents interface for all types for teststeps, includes:
 // StepRequest, StepRequestWithOptionalArgs, StepRequestValidation, StepRequestExtraction,
 // StepTestCaseWithOptionalArgs,
-// StepTransaction, StepRendezvous.
+// StepTransaction, StepRendezvous, StepWebSocket.
 type IStep interface {
 	Name() string
 	Type() StepType

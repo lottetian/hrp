@@ -39,6 +39,7 @@ const (
 type Request struct {
 	Method         HTTPMethod             `json:"method" yaml:"method"` // required
 	URL            string                 `json:"url" yaml:"url"`       // required
+	HTTP2          bool                   `json:"http2,omitempty" yaml:"http2,omitempty"`
 	Params         map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
 	Headers        map[string]string      `json:"headers,omitempty" yaml:"headers,omitempty"`
 	Cookies        map[string]string      `json:"cookies,omitempty" yaml:"cookies,omitempty"`
@@ -56,17 +57,23 @@ func newRequestBuilder(parser *Parser, config *TConfig, stepRequest *Request) *r
 	var requestMap map[string]interface{}
 	_ = json.Unmarshal(jsonRequest, &requestMap)
 
+	request := &http.Request{
+		Header: make(http.Header),
+	}
+	if stepRequest.HTTP2 {
+		request.ProtoMajor = 2
+		request.ProtoMinor = 0
+	} else {
+		request.ProtoMajor = 1
+		request.ProtoMinor = 1
+	}
+
 	return &requestBuilder{
 		stepRequest: stepRequest,
-		req: &http.Request{
-			Header:     make(http.Header),
-			Proto:      "HTTP/1.1",
-			ProtoMajor: 1,
-			ProtoMinor: 1,
-		},
-		config:     config,
-		parser:     parser,
-		requestMap: requestMap,
+		req:         request,
+		config:      config,
+		parser:      parser,
+		requestMap:  requestMap,
 	}
 }
 
@@ -253,19 +260,15 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	defer func() {
 		// update testcase summary
 		if err != nil {
-			log.Error().Err(err).Msg("run request step failed")
 			stepResult.Attachment = err.Error()
-		} else {
-			// update extracted variables
-			r.UpdateSession(stepResult.ExportVars)
-			log.Info().
-				Str("step", step.Name).
-				Bool("success", stepResult.Success).
-				Interface("exportVars", stepResult.ExportVars).
-				Msg("run step end")
 		}
-		r.UpdateSummary(stepResult)
 	}()
+
+	// override step variables
+	stepVariables, err := r.MergeStepVariables(step.Variables)
+	if err != nil {
+		return
+	}
 
 	sessionData := newSessionData()
 	parser := r.GetParser()
@@ -273,12 +276,6 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 
 	rb := newRequestBuilder(parser, config, step.Request)
 	rb.req.Method = string(step.Request.Method)
-
-	// override step variables
-	stepVariables, err := r.MergeStepVariables(step.Variables)
-	if err != nil {
-		return
-	}
 
 	err = rb.prepareUrlParams(stepVariables)
 	if err != nil {
@@ -316,7 +313,13 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 
 	// do request action
 	start := time.Now()
-	resp, err := r.hrpRunner.client.Do(rb.req)
+	var resp *http.Response
+	if step.Request.HTTP2 {
+		resp, err = r.hrpRunner.http2Client.Do(rb.req)
+	} else {
+		resp, err = r.hrpRunner.httpClient.Do(rb.req)
+	}
+
 	stepResult.Elapsed = time.Since(start).Milliseconds()
 	if err != nil {
 		traceId, ok := rb.req.Header["Cloud-Trace-Id"]
@@ -342,7 +345,7 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	}
 
 	// new response object
-	respObj, err := newResponseObject(r.hrpRunner.t, parser, resp)
+	respObj, err := newHttpResponseObject(r.hrpRunner.t, parser, resp)
 	if err != nil {
 		err = errors.Wrap(err, "init ResponseObject error")
 		return
@@ -380,6 +383,17 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	stepResult.ContentSize = resp.ContentLength
 	stepResult.Data = sessionData
 
+	// update summary
+	r.summary.Records = append(r.summary.Records, stepResult)
+	r.summary.Stat.Total += 1
+	if stepResult.Success {
+		r.summary.Stat.Successes += 1
+	} else {
+		r.summary.Stat.Failures += 1
+		// update summary result to failed
+		r.summary.Success = false
+	}
+
 	return stepResult, err
 }
 
@@ -408,7 +422,7 @@ func printRequest(req *http.Request) error {
 	}
 	fmt.Println("-------------------- request --------------------")
 	reqContent := string(reqDump)
-	if req.Body != nil && !printBody {
+	if reqContentType != "" && !printBody {
 		reqContent += fmt.Sprintf("(request body omitted for Content-Type: %v)", reqContentType)
 	}
 	fmt.Println(reqContent)
@@ -416,7 +430,7 @@ func printRequest(req *http.Request) error {
 }
 
 func printResponse(resp *http.Response) error {
-	fmt.Println("==================== response ===================")
+	fmt.Println("==================== response ====================")
 	respContentType := resp.Header.Get("Content-Type")
 	printBody := shouldPrintBody(respContentType)
 	respDump, err := httputil.DumpResponse(resp, printBody)
@@ -424,7 +438,7 @@ func printResponse(resp *http.Response) error {
 		return errors.Wrap(err, "dump response failed")
 	}
 	respContent := string(respDump)
-	if !printBody {
+	if respContentType != "" && !printBody {
 		respContent += fmt.Sprintf("(response body omitted for Content-Type: %v)", respContentType)
 	}
 	fmt.Println(respContent)
@@ -504,11 +518,24 @@ func (s *StepRequest) SetTimes(times string) *StepRequest {
 	}
 }
 
+// HTTP2 enables HTTP/2 protocol
+func (s *StepRequest) HTTP2() *StepRequest {
+	s.step.Request = &Request{
+		HTTP2: true,
+	}
+	return s
+}
+
 // GET makes a HTTP GET request.
 func (s *StepRequest) GET(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpGET,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpGET
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpGET,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -517,9 +544,14 @@ func (s *StepRequest) GET(url string) *StepRequestWithOptionalArgs {
 
 // HEAD makes a HTTP HEAD request.
 func (s *StepRequest) HEAD(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpHEAD,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpHEAD
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpHEAD,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -528,9 +560,14 @@ func (s *StepRequest) HEAD(url string) *StepRequestWithOptionalArgs {
 
 // POST makes a HTTP POST request.
 func (s *StepRequest) POST(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpPOST,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpPOST
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpPOST,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -539,9 +576,14 @@ func (s *StepRequest) POST(url string) *StepRequestWithOptionalArgs {
 
 // PUT makes a HTTP PUT request.
 func (s *StepRequest) PUT(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpPUT,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpPUT
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpPUT,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -550,9 +592,14 @@ func (s *StepRequest) PUT(url string) *StepRequestWithOptionalArgs {
 
 // DELETE makes a HTTP DELETE request.
 func (s *StepRequest) DELETE(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpDELETE,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpDELETE
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpDELETE,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -561,9 +608,14 @@ func (s *StepRequest) DELETE(url string) *StepRequestWithOptionalArgs {
 
 // OPTIONS makes a HTTP OPTIONS request.
 func (s *StepRequest) OPTIONS(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpOPTIONS,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpOPTIONS
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpOPTIONS,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -572,9 +624,14 @@ func (s *StepRequest) OPTIONS(url string) *StepRequestWithOptionalArgs {
 
 // PATCH makes a HTTP PATCH request.
 func (s *StepRequest) PATCH(url string) *StepRequestWithOptionalArgs {
-	s.step.Request = &Request{
-		Method: httpPATCH,
-		URL:    url,
+	if s.step.Request != nil {
+		s.step.Request.Method = httpPATCH
+		s.step.Request.URL = url
+	} else {
+		s.step.Request = &Request{
+			Method: httpPATCH,
+			URL:    url,
+		}
 	}
 	return &StepRequestWithOptionalArgs{
 		step: s.step,
@@ -635,6 +692,24 @@ func (s *StepRequest) SetThinkTime(time float64) *StepThinkTime {
 		Time: time,
 	}
 	return &StepThinkTime{
+		step: s.step,
+	}
+}
+
+// SetRendezvous creates a new rendezvous
+func (s *StepRequest) SetRendezvous(name string) *StepRendezvous {
+	s.step.Rendezvous = &Rendezvous{
+		Name: name,
+	}
+	return &StepRendezvous{
+		step: s.step,
+	}
+}
+
+// WebSocket creates a new websocket action
+func (s *StepRequest) WebSocket() *StepWebSocket {
+	s.step.WebSocket = &WebSocketAction{}
+	return &StepWebSocket{
 		step: s.step,
 	}
 }
@@ -761,7 +836,13 @@ func (s *StepRequestExtraction) Name() string {
 }
 
 func (s *StepRequestExtraction) Type() StepType {
-	return StepType(fmt.Sprintf("request-%v", s.step.Request.Method))
+	if s.step.Request != nil {
+		return StepType(fmt.Sprintf("request-%v", s.step.Request.Method))
+	}
+	if s.step.WebSocket != nil {
+		return StepType(fmt.Sprintf("websocket-%v", s.step.WebSocket.Type))
+	}
+	return "extraction"
 }
 
 func (s *StepRequestExtraction) Struct() *TStep {
@@ -769,7 +850,13 @@ func (s *StepRequestExtraction) Struct() *TStep {
 }
 
 func (s *StepRequestExtraction) Run(r *SessionRunner) (*StepResult, error) {
-	return runStepRequestWithTimes(r, s.step)
+	if s.step.Request != nil {
+		return runStepRequestWithTimes(r, s.step)
+	}
+	if s.step.WebSocket != nil {
+		return runStepWebSocket(r, s.step)
+	}
+	return nil, errors.New("unexpected protocol type")
 }
 
 // StepRequestValidation implements IStep interface.
@@ -785,7 +872,13 @@ func (s *StepRequestValidation) Name() string {
 }
 
 func (s *StepRequestValidation) Type() StepType {
-	return StepType(fmt.Sprintf("request-%v", s.step.Request.Method))
+	if s.step.Request != nil {
+		return StepType(fmt.Sprintf("request-%v", s.step.Request.Method))
+	}
+	if s.step.WebSocket != nil {
+		return StepType(fmt.Sprintf("websocket-%v", s.step.WebSocket.Type))
+	}
+	return "validation"
 }
 
 func (s *StepRequestValidation) Struct() *TStep {
@@ -793,7 +886,13 @@ func (s *StepRequestValidation) Struct() *TStep {
 }
 
 func (s *StepRequestValidation) Run(r *SessionRunner) (*StepResult, error) {
-	return runStepRequestWithTimes(r, s.step)
+	if s.step.Request != nil {
+		return runStepRequestWithTimes(r, s.step)
+	}
+	if s.step.WebSocket != nil {
+		return runStepWebSocket(r, s.step)
+	}
+	return nil, errors.New("unexpected protocol type")
 }
 
 func (s *StepRequestValidation) AssertEqual(jmesPath string, expected interface{}, msg string) *StepRequestValidation {

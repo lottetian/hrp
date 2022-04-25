@@ -2,21 +2,23 @@ package hrp
 
 import (
 	"os"
-	"os/exec"
 	"testing"
 	"time"
 
-	"github.com/lottetian/hrp/internal/scaffold"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/scaffold"
 )
 
 func buildHashicorpGoPlugin() {
 	log.Info().Msg("[init] build hashicorp go plugin")
-	cmd := exec.Command("go", "build",
+	err := builtin.ExecCommand("go", "build",
 		"-o", templatesDir+"debugtalk.bin", templatesDir+"plugin/debugtalk.go")
-	if err := cmd.Run(); err != nil {
-		panic(err)
+	if err != nil {
+		log.Error().Err(err).Msg("build hashicorp go plugin failed")
+		os.Exit(1)
 	}
 }
 
@@ -30,7 +32,8 @@ func buildHashicorpPyPlugin() {
 	pluginFile := templatesDir + "debugtalk.py"
 	err := scaffold.CopyFile("templates/plugin/debugtalk.py", pluginFile)
 	if err != nil {
-		panic(err)
+		log.Error().Err(err).Msg("build hashicorp python plugin failed")
+		os.Exit(1)
 	}
 }
 
@@ -159,7 +162,7 @@ func TestRunCaseWithPluginJSON(t *testing.T) {
 
 	err := NewRunner(nil).Run(&demoTestCaseWithPluginJSONPath) // hrp.Run(testCase)
 	if err != nil {
-		t.Fail()
+		t.Fatal()
 	}
 }
 
@@ -169,7 +172,7 @@ func TestRunCaseWithPluginYAML(t *testing.T) {
 
 	err := NewRunner(nil).Run(&demoTestCaseWithPluginYAMLPath) // hrp.Run(testCase)
 	if err != nil {
-		t.Fail()
+		t.Fatal()
 	}
 }
 
@@ -179,7 +182,7 @@ func TestRunCaseWithRefAPI(t *testing.T) {
 
 	err := NewRunner(nil).Run(&demoTestCaseWithRefAPIPath)
 	if err != nil {
-		t.Fail()
+		t.Fatal()
 	}
 
 	testcase := &TestCase{
@@ -193,50 +196,50 @@ func TestRunCaseWithRefAPI(t *testing.T) {
 	r := NewRunner(t)
 	err = r.Run(testcase)
 	if err != nil {
-		t.Fail()
+		t.Fatal()
 	}
 }
 
 func TestLoadTestCases(t *testing.T) {
 	// load test cases from folder path
-	tc := TestCasePath("../examples/demo-with-py-plugin/testcases/")
-	testCases, err := loadTestCases(&tc)
+	tc := TestCasePath("./examples/demo-with-py-plugin/testcases/")
+	testCases, err := LoadTestCases(&tc)
 	if !assert.Nil(t, err) {
-		t.Fail()
+		t.Fatal()
 	}
 	if !assert.Equal(t, len(testCases), 3) {
-		t.Fail()
+		t.Fatal()
 	}
 
 	// load test cases from folder path, including sub folders
-	tc = TestCasePath("../examples/demo-with-py-plugin/")
-	testCases, err = loadTestCases(&tc)
+	tc = TestCasePath("./examples/demo-with-py-plugin/")
+	testCases, err = LoadTestCases(&tc)
 	if !assert.Nil(t, err) {
-		t.Fail()
+		t.Fatal()
 	}
 	if !assert.Equal(t, len(testCases), 3) {
-		t.Fail()
+		t.Fatal()
 	}
 
 	// load test cases from single file path
 	tc = demoTestCaseWithPluginJSONPath
-	testCases, err = loadTestCases(&tc)
+	testCases, err = LoadTestCases(&tc)
 	if !assert.Nil(t, err) {
-		t.Fail()
+		t.Fatal()
 	}
 	if !assert.Equal(t, 1, len(testCases)) {
-		t.Fail()
+		t.Fatal()
 	}
 
 	// load test cases from TestCase instance
 	testcase := &TestCase{
 		Config: NewConfig("TestCase").SetWeight(3),
 	}
-	testCases, err = loadTestCases(testcase)
+	testCases, err = LoadTestCases(testcase)
 	if !assert.Nil(t, err) {
-		t.Fail()
+		t.Fatal()
 	}
 	if !assert.Equal(t, len(testCases), 1) {
-		t.Fail()
+		t.Fatal()
 	}
 }

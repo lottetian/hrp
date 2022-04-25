@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
+	"github.com/httprunner/funplugin/shared"
 	"github.com/lottetian/hrp/internal/json"
 )
 
@@ -75,16 +77,59 @@ func FormatResponse(raw interface{}) interface{} {
 	return formattedResponse
 }
 
-func ExecCommand(cmd *exec.Cmd, cwd string) error {
-	log.Info().Str("cmd", cmd.String()).Str("cwd", cwd).Msg("exec command")
-	cmd.Dir = cwd
-	output, err := cmd.CombinedOutput()
-	out := strings.TrimSpace(string(output))
+func EnsurePython3Venv(packages ...string) (string, error) {
+	// create python venv
+	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Error().Err(err).Str("output", out).Msg("exec command failed")
-	} else if len(out) != 0 {
-		log.Info().Str("output", out).Msg("exec command success")
+		return "", errors.Wrap(err, "get user home dir failed")
 	}
+	venvDir := filepath.Join(home, ".hrp", "venv")
+	python3, err := shared.EnsurePython3Venv(venvDir, packages...)
+	if err != nil {
+		return "", errors.Wrap(err, "ensure python venv failed")
+	}
+
+	return python3, nil
+}
+
+func ExecCommandInDir(cmd *exec.Cmd, dir string) error {
+	log.Info().Str("cmd", cmd.String()).Str("dir", dir).Msg("exec command")
+	cmd.Dir = dir
+
+	// print output with colors
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		log.Error().Err(err).Msg("exec command failed")
+		return err
+	}
+
+	return nil
+}
+
+func ExecCommand(cmdName string, args ...string) error {
+	cmd := exec.Command(cmdName, args...)
+	log.Info().Str("cmd", cmd.String()).Msg("exec command")
+
+	// print output with colors
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// add cmd dir path to PATH
+	PATH := fmt.Sprintf("%s:%s", filepath.Dir(cmdName), os.Getenv("PATH"))
+	if err := os.Setenv("PATH", PATH); err != nil {
+		log.Error().Err(err).Msg("failed to add cmd dir path to $PATH")
+		return err
+	}
+
+	err := cmd.Run()
+	if err != nil {
+		log.Error().Err(err).Msg("exec command failed")
+		return err
+	}
+
 	return err
 }
 
@@ -198,6 +243,39 @@ func Interface2Float64(i interface{}) (float64, error) {
 	return 0, errors.New("failed to convert interface to float64")
 }
 
+func TypeNormalization(raw interface{}) interface{} {
+	rawValue := reflect.ValueOf(raw)
+	switch rawValue.Kind() {
+	case reflect.Int:
+		return rawValue.Int()
+	case reflect.Int8:
+		return rawValue.Int()
+	case reflect.Int16:
+		return rawValue.Int()
+	case reflect.Int32:
+		return rawValue.Int()
+	case reflect.Float32:
+		return rawValue.Float()
+	case reflect.Uint:
+		return rawValue.Uint()
+	case reflect.Uint8:
+		return rawValue.Uint()
+	case reflect.Uint16:
+		return rawValue.Uint()
+	case reflect.Uint32:
+		return rawValue.Uint()
+	default:
+		return raw
+	}
+}
+
+func InterfaceType(raw interface{}) string {
+	if raw == nil {
+		return ""
+	}
+	return reflect.TypeOf(raw).String()
+}
+
 var ErrUnsupportedFileExt = fmt.Errorf("unsupported file extension")
 
 // LoadFile loads file content with file extension and assigns to structObj
@@ -227,24 +305,35 @@ func loadFromCSV(path string) []map[string]interface{} {
 	file, err := readFile(path)
 	if err != nil {
 		log.Error().Err(err).Msg("read csv file failed")
-		panic(err)
+		os.Exit(1)
 	}
 
 	r := csv.NewReader(strings.NewReader(string(file)))
 	content, err := r.ReadAll()
 	if err != nil {
 		log.Error().Err(err).Msg("parse csv file failed")
-		panic(err)
+		os.Exit(1)
 	}
+	firstLine := content[0] // parameter names
 	var result []map[string]interface{}
 	for i := 1; i < len(content); i++ {
 		row := make(map[string]interface{})
 		for j := 0; j < len(content[i]); j++ {
-			row[content[0][j]] = content[i][j]
+			row[firstLine[j]] = content[i][j]
 		}
 		result = append(result, row)
 	}
 	return result
+}
+
+func loadMessage(path string) []byte {
+	log.Info().Str("path", path).Msg("load message file")
+	file, err := readFile(path)
+	if err != nil {
+		log.Error().Err(err).Msg("read message file failed")
+		os.Exit(1)
+	}
+	return file
 }
 
 func readFile(path string) ([]byte, error) {

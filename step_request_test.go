@@ -80,7 +80,8 @@ func TestRunRequestRun(t *testing.T) {
 		TestSteps: []IStep{stepGET, stepPOSTData},
 	}
 	runner := NewRunner(t).SetRequestsLogOn()
-	sessionRunner := runner.NewSessionRunner(testcase)
+	sessionRunner, _ := runner.NewSessionRunner(testcase)
+
 	if _, err := stepGET.Run(sessionRunner); err != nil {
 		t.Fatalf("stepGET.Run() error: %v", err)
 	}

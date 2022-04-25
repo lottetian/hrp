@@ -2,7 +2,6 @@ package hrp
 
 import (
 	"fmt"
-	"github.com/rs/zerolog/log"
 
 	"github.com/lottetian/hrp/internal/builtin"
 )
@@ -49,6 +48,7 @@ func (path *APIPath) ToAPI() (*API, error) {
 		return nil, err
 	}
 	err = convertCompatValidator(api.Validators)
+	convertExtract(api.Extract)
 	return api, err
 }
 
@@ -92,13 +92,11 @@ func (s *StepAPIWithOptionalArgs) Struct() *TStep {
 }
 
 func (s *StepAPIWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error) {
-	log.Info().Str("api", s.step.Name).Msg("run referenced api")
-
 	// extend request with referenced API
 	api, _ := s.step.API.(*API)
 	extendWithAPI(s.step, api)
 
-	stepResult, err := runStepRequestWithTimes(r, s.step)
+	stepResult, err := runStepRequest(r, s.step)
 	if err != nil {
 		r.summary.Success = false
 		return nil, err

@@ -44,51 +44,54 @@ func (s *StepTestCaseWithOptionalArgs) Struct() *TStep {
 }
 
 func (s *StepTestCaseWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error) {
-	stepVariables, err := r.MergeStepVariables(s.step.Variables)
-	if err != nil {
-		return nil, err
-	}
-	s.step.Variables = stepVariables
-
-	log.Info().Str("testcase", s.step.Name).Msg("run referenced testcase")
 	stepResult := &StepResult{
 		Name:     s.step.Name,
 		StepType: stepTypeTestCase,
 		Success:  false,
 	}
-	testcase := s.step.TestCase.(*TestCase)
+
+	stepVariables, err := r.MergeStepVariables(s.step.Variables)
+	if err != nil {
+		return stepResult, err
+	}
+
+	stepTestCase := s.step.TestCase.(*TestCase)
 
 	// copy testcase to avoid data racing
 	copiedTestCase := &TestCase{}
-	if err := copier.Copy(copiedTestCase, testcase); err != nil {
-		log.Error().Err(err).Msg("copy testcase failed")
+	if err := copier.Copy(copiedTestCase, stepTestCase); err != nil {
+		log.Error().Err(err).Msg("copy step testcase failed")
 		return stepResult, err
 	}
-	// override testcase config
-	extendWithTestCase(s.step, copiedTestCase)
 
-	sessionRunner := r.hrpRunner.NewSessionRunner(copiedTestCase)
+	// override testcase config
+	// override testcase name
+	if s.step.Name != "" {
+		copiedTestCase.Config.Name = s.step.Name
+	}
+	// merge & override extractors
+	copiedTestCase.Config.Export = mergeSlices(s.step.Export, copiedTestCase.Config.Export)
+
+	sessionRunner, err := r.hrpRunner.NewSessionRunner(copiedTestCase)
+	if err != nil {
+		log.Error().Err(err).Msg("create session runner failed")
+		return stepResult, err
+	}
 
 	start := time.Now()
-	err = sessionRunner.Start()
+	// run referenced testcase with step variables
+	err = sessionRunner.Start(stepVariables)
 	stepResult.Elapsed = time.Since(start).Milliseconds()
 	if err != nil {
-		log.Error().Err(err).Msg("run referenced testcase step failed")
-		log.Info().Str("step", s.step.Name).Bool("success", false).Msg("run step end")
 		stepResult.Attachment = err.Error()
 		r.summary.Success = false
 		return stepResult, err
 	}
 	summary := sessionRunner.GetSummary()
-	stepResult.Data = summary
+	stepResult.Data = summary.Records
 	// export testcase export variables
-	stepResult.ExportVars = sessionRunner.summary.InOut.ExportVars
+	stepResult.ExportVars = summary.InOut.ExportVars
 	stepResult.Success = true
-
-	// update extracted variables
-	for k, v := range stepResult.ExportVars {
-		r.sessionVariables[k] = v
-	}
 
 	// merge testcase summary
 	r.summary.Records = append(r.summary.Records, summary.Records...)
@@ -96,23 +99,5 @@ func (s *StepTestCaseWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error
 	r.summary.Stat.Successes += summary.Stat.Successes
 	r.summary.Stat.Failures += summary.Stat.Failures
 
-	log.Info().
-		Str("step", s.step.Name).
-		Bool("success", true).
-		Interface("exportVars", stepResult.ExportVars).
-		Msg("run step end")
-
 	return stepResult, nil
-}
-
-// extend referenced testcase with teststep, teststep config merge and override referenced testcase config
-func extendWithTestCase(testStep *TStep, overriddenTestCase *TestCase) {
-	// override testcase name
-	if testStep.Name != "" {
-		overriddenTestCase.Config.Name = testStep.Name
-	}
-	// merge & override variables
-	overriddenTestCase.Config.Variables = mergeVariables(testStep.Variables, overriddenTestCase.Config.Variables)
-	// merge & override extractors
-	overriddenTestCase.Config.Export = mergeSlices(testStep.Export, overriddenTestCase.Config.Export)
 }

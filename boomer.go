@@ -1,10 +1,10 @@
 package hrp
 
 import (
+	"os"
 	"sync"
 	"time"
 
-	"github.com/jinzhu/copier"
 	"github.com/rs/zerolog/log"
 
 	"github.com/httprunner/funplugin"
@@ -17,11 +17,17 @@ func NewBoomer(spawnCount int, spawnRate float64) *HRPBoomer {
 		Boomer:       boomer.NewStandaloneBoomer(spawnCount, spawnRate),
 		pluginsMutex: new(sync.RWMutex),
 	}
+
+	b.hrpRunner = NewRunner(nil)
+	// set client transport for high concurrency load testing
+	b.hrpRunner.SetClientTransport(b.GetSpawnCount(), b.GetDisableKeepAlive(), b.GetDisableCompression())
+
 	return b
 }
 
 type HRPBoomer struct {
 	*boomer.Boomer
+	hrpRunner    *HRPRunner
 	plugins      []funplugin.IPlugin // each task has its own plugin process
 	pluginsMutex *sync.RWMutex       // avoid data race
 }
@@ -45,17 +51,13 @@ func (b *HRPBoomer) Run(testcases ...ITestCase) {
 	var taskSlice []*boomer.Task
 
 	// load all testcases
-	testCases, err := loadTestCases(testcases...)
+	testCases, err := LoadTestCases(testcases...)
 	if err != nil {
-		panic(err)
+		log.Error().Err(err).Msg("failed to load testcases")
+		os.Exit(1)
 	}
 
 	for _, testcase := range testCases {
-		cfg := testcase.Config
-		err = initParameterIterator(cfg, "boomer")
-		if err != nil {
-			panic(err)
-		}
 		rendezvousList := initRendezvous(testcase, int64(b.GetSpawnCount()))
 		task := b.convertBoomerTask(testcase, rendezvousList)
 		taskSlice = append(taskSlice, task)
@@ -75,16 +77,16 @@ func (b *HRPBoomer) Quit() {
 }
 
 func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rendezvous) *boomer.Task {
-	hrpRunner := NewRunner(nil)
-	// set client transport for high concurrency load testing
-	hrpRunner.SetClientTransport(b.GetSpawnCount(), b.GetDisableKeepAlive(), b.GetDisableCompression())
-	config := testcase.Config
-
-	// each testcase has its own plugin process
-	plugin, _ := initPlugin(config.Path, false)
-	if plugin != nil {
+	// init runner for testcase
+	// this runner is shared by multiple session runners
+	caseRunner, err := b.hrpRunner.newCaseRunner(testcase)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create runner")
+		os.Exit(1)
+	}
+	if caseRunner.parser.plugin != nil {
 		b.pluginsMutex.Lock()
-		b.plugins = append(b.plugins, plugin)
+		b.plugins = append(b.plugins, caseRunner.parser.plugin)
 		b.pluginsMutex.Unlock()
 	}
 
@@ -96,33 +98,22 @@ func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rend
 		}
 	}()
 
+	// set paramters mode for load testing
+	parametersIterator := caseRunner.parametersIterator
+	parametersIterator.SetUnlimitedMode()
+
 	return &boomer.Task{
-		Name:   config.Name,
-		Weight: config.Weight,
+		Name:   testcase.Config.Name,
+		Weight: testcase.Config.Weight,
 		Fn: func() {
-			sessionTestCase := &TestCase{}
-			// copy testcase to avoid data racing
-			if err := copier.Copy(sessionTestCase, testcase); err != nil {
-				log.Error().Err(err).Msg("copy testcase data failed")
-				return
-			}
-			sessionRunner := hrpRunner.NewSessionRunner(sessionTestCase)
-			sessionRunner.parser.plugin = plugin
+			testcaseSuccess := true    // flag whole testcase result
+			transactionSuccess := true // flag current transaction result
 
-			testcaseSuccess := true       // flag whole testcase result
-			var transactionSuccess = true // flag current transaction result
+			// init session runner
+			sessionRunner := caseRunner.newSession()
 
-			cfg := sessionTestCase.Config
-			// iterate through all parameter iterators and update case variables
-			for _, it := range cfg.ParametersSetting.Iterators {
-				if it.HasNext() {
-					cfg.Variables = mergeVariables(it.Next(), cfg.Variables)
-				}
-			}
-
-			if err := sessionRunner.parseConfig(cfg); err != nil {
-				log.Error().Err(err).Msg("parse config failed")
-				return
+			if parametersIterator.HasNext() {
+				sessionRunner.updateConfigVariables(parametersIterator.Next())
 			}
 
 			startTime := time.Now()
@@ -140,8 +131,8 @@ func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rend
 					testcaseSuccess = false
 					transactionSuccess = false
 
-					if hrpRunner.failfast {
-						log.Error().Msg("abort running due to failfast setting")
+					if b.hrpRunner.failfast {
+						log.Error().Err(err).Msg("abort running due to failfast setting")
 						break
 					}
 					log.Warn().Err(err).Msg("run step failed, continue next step")
@@ -164,6 +155,10 @@ func (b *HRPBoomer) convertBoomerTask(testcase *TestCase, rendezvousList []*Rend
 				} else {
 					// request or testcase step
 					b.RecordSuccess(string(step.Type()), step.Name(), stepResult.Elapsed, stepResult.ContentSize)
+					// update extracted variables
+					for k, v := range stepResult.ExportVars {
+						sessionRunner.sessionVariables[k] = v
+					}
 				}
 			}
 			endTime := time.Now()
