@@ -99,7 +99,7 @@ func (s *StepAPIWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error) {
 	stepResult, err := runStepRequest(r, s.step)
 	if err != nil {
 		r.summary.Success = false
-		return nil, err
+		return stepResult, err
 	}
 	stepResult.StepType = stepTypeAPI
 	return stepResult, nil
