@@ -520,13 +520,13 @@ var (
 func NewPrometheusPusherOutput(gatewayURL, jobName string) *PrometheusPusherOutput {
 	nodeUUID, _ := uuid.NewUUID()
 	return &PrometheusPusherOutput{
-		pusher: push.New(gatewayURL, jobName).Grouping("instance", nodeUUID.String()),
+		Pusher: push.New(gatewayURL, jobName).Grouping("instance", nodeUUID.String()),
 	}
 }
 
 // PrometheusPusherOutput pushes boomer stats to Prometheus Pushgateway.
 type PrometheusPusherOutput struct {
-	pusher *push.Pusher // Prometheus Pushgateway Pusher
+	Pusher *push.Pusher // Prometheus Pushgateway Pusher
 }
 
 // OnStart will register all prometheus metric collectors
@@ -557,14 +557,14 @@ func (o *PrometheusPusherOutput) OnStart() {
 		gaugeTransactionsPassed,
 		gaugeTransactionsFailed,
 	)
-	o.pusher = o.pusher.Gatherer(registry)
+	o.Pusher = o.Pusher.Gatherer(registry)
 }
 
 // OnStop of PrometheusPusherOutput has nothing to do.
 func (o *PrometheusPusherOutput) OnStop() {
 	// update runner state: stopped
 	gaugeState.Set(float64(stateStopped))
-	if err := o.pusher.Push(); err != nil {
+	if err := o.Pusher.Push(); err != nil {
 		log.Error().Err(err).Msg("push to Pushgateway failed")
 	}
 }
@@ -625,7 +625,7 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 		).Add(float64(requestError["occurrences"].(int64)))
 	}
 
-	if err := o.pusher.Push(); err != nil {
+	if err := o.Pusher.Push(); err != nil {
 		log.Error().Err(err).Msg("push to Pushgateway failed")
 	}
 }

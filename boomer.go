@@ -1,6 +1,8 @@
 package hrp
 
 import (
+	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/push"
 	"os"
 	"sync"
 	"time"
@@ -35,6 +37,14 @@ type HRPBoomer struct {
 // NewConsoleOutput returns a ConsoleOutput.
 func (b *HRPBoomer) NewConsoleOutput() *boomer.ConsoleOutput {
 	return &boomer.ConsoleOutput{}
+}
+
+// NewPrometheusPusherOutput returns a NewPrometheusPusherOutput.
+func (b *HRPBoomer) NewPrometheusPusherOutput(gatewayURL, jobName string) *boomer.PrometheusPusherOutput {
+	nodeUUID, _ := uuid.NewUUID()
+	return &boomer.PrometheusPusherOutput{
+		Pusher: push.New(gatewayURL, jobName).Grouping("instance", nodeUUID.String()),
+	}
 }
 
 // Run starts to run load test for one or multiple testcases.
