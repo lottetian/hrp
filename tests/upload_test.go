@@ -16,14 +16,14 @@ func TestCaseUploadFile(t *testing.T) {
 				WithVariables(map[string]interface{}{
 					"m_encoder": "${multipart_encoder($m_upload)}",
 					"m_upload":  map[string]interface{}{"file": "$upload_file"},
-				}).SetCurrent(true).
+				}).
 				POST("/post").
 				WithHeaders(map[string]string{"Content-Type": "${multipart_content_type($m_encoder)}"}).
 				WithBody("$m_encoder").
 				Validate().
 				AssertEqual("status_code", 200, "check status code").
 				AssertStartsWith("body.files.file", "UserName=test", "check uploaded file"),
-			hrp.NewStep("upload file with keyword").SetCurrent(true).
+			hrp.NewStep("upload file with keyword").
 				POST("/post").
 				WithUpload(map[string]interface{}{"file": "$upload_file"}).
 				Validate().

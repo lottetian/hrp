@@ -454,9 +454,9 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 }
 
 func runStepRequestWithTimes(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
-	times, _ := strconv.Atoi(step.Times)
+	times, atoErr := strconv.Atoi(step.Times)
 	current := step.Current
-	if err != nil {
+	if atoErr != nil {
 		log.Info().Str("step", step.Name).Msg("run step start")
 		return runStepRequest(r, step)
 	}
