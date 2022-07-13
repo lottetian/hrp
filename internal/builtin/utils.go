@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
-	"github.com/httprunner/funplugin/shared"
 	"github.com/lottetian/hrp/internal/json"
 )
 
@@ -28,8 +27,19 @@ func Dump2JSON(data interface{}, path string) error {
 		return err
 	}
 	log.Info().Str("path", path).Msg("dump data to json")
-	file, _ := json.MarshalIndent(data, "", "    ")
-	err = os.WriteFile(path, file, 0644)
+
+	// init json encoder
+	buffer := new(bytes.Buffer)
+	encoder := json.NewEncoder(buffer)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "    ")
+
+	err = encoder.Encode(data)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(path, buffer.Bytes(), 0o644)
 	if err != nil {
 		log.Error().Err(err).Msg("dump json path failed")
 		return err
@@ -56,7 +66,7 @@ func Dump2YAML(data interface{}, path string) error {
 		return err
 	}
 
-	err = os.WriteFile(path, buffer.Bytes(), 0644)
+	err = os.WriteFile(path, buffer.Bytes(), 0o644)
 	if err != nil {
 		log.Error().Err(err).Msg("dump yaml path failed")
 		return err
@@ -77,19 +87,98 @@ func FormatResponse(raw interface{}) interface{} {
 	return formattedResponse
 }
 
-func EnsurePython3Venv(packages ...string) (string, error) {
-	// create python venv
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", errors.Wrap(err, "get user home dir failed")
+var python3Executable string = "python3" // system default python3
+
+// EnsurePython3Venv ensures python3 venv with specified packages
+// venv should be directory path of target venv
+func EnsurePython3Venv(venv string, packages ...string) (python3 string, err error) {
+	// priority: specified > $HOME/.hrp/venv
+	if venv == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", errors.Wrap(err, "get user home dir failed")
+		}
+		venv = filepath.Join(home, ".hrp", "venv")
 	}
-	venvDir := filepath.Join(home, ".hrp", "venv")
-	python3, err := shared.EnsurePython3Venv(venvDir, packages...)
+	python3, err = ensurePython3Venv(venv, packages...)
 	if err != nil {
-		return "", errors.Wrap(err, "ensure python venv failed")
+		return "", errors.Wrap(err, "prepare python3 venv failed")
+	}
+	python3Executable = python3
+	log.Info().Str("Python3Executable", python3Executable).Msg("set python3 executable path")
+	return python3, nil
+}
+
+func ExecPython3Command(cmdName string, args ...string) error {
+	args = append([]string{"-m", cmdName}, args...)
+	return ExecCommand(python3Executable, args...)
+}
+
+func AssertPythonPackage(python3 string, pkgName, pkgVersion string) error {
+	out, err := exec.Command(
+		python3, "-c", fmt.Sprintf("import %s; print(%s.__version__)", pkgName, pkgName),
+	).Output()
+	if err != nil {
+		return fmt.Errorf("python package %s not found", pkgName)
 	}
 
-	return python3, nil
+	// do not check version if pkgVersion is empty
+	if pkgVersion == "" {
+		log.Info().Str("name", pkgName).Msg("python package is ready")
+		return nil
+	}
+
+	// check package version equality
+	version := strings.TrimSpace(string(out))
+	if strings.TrimLeft(version, "v") != strings.TrimLeft(pkgVersion, "v") {
+		return fmt.Errorf("python package %s version %s not matched, please upgrade to %s",
+			pkgName, version, pkgVersion)
+	}
+
+	log.Info().Str("name", pkgName).Str("version", pkgVersion).Msg("python package is ready")
+	return nil
+}
+
+func InstallPythonPackage(python3 string, pkg string) (err error) {
+	var pkgName, pkgVersion string
+	if strings.Contains(pkg, "==") {
+		// funppy==0.5.0
+		pkgInfo := strings.Split(pkg, "==")
+		pkgName = pkgInfo[0]
+		pkgVersion = pkgInfo[1]
+	} else {
+		// funppy
+		pkgName = pkg
+	}
+
+	// check if package installed and version matched
+	err = AssertPythonPackage(python3, pkgName, pkgVersion)
+	if err == nil {
+		return nil
+	}
+
+	// check if pip available
+	err = ExecCommand(python3, "-m", "pip", "--version")
+	if err != nil {
+		log.Warn().Msg("pip is not available")
+		return errors.Wrap(err, "pip is not available")
+	}
+
+	log.Info().Str("pkgName", pkgName).Str("pkgVersion", pkgVersion).Msg("installing python package")
+
+	// install package
+	pypiIndexURL := os.Getenv("PYPI_INDEX_URL")
+	if pypiIndexURL == "" {
+		pypiIndexURL = "https://pypi.org/simple" // default
+	}
+	err = ExecCommand(python3, "-m", "pip", "install", "--upgrade", pkg,
+		"--index-url", pypiIndexURL,
+		"--quiet", "--disable-pip-version-check")
+	if err != nil {
+		return errors.Wrap(err, "pip install package failed")
+	}
+
+	return AssertPythonPackage(python3, pkgName, pkgVersion)
 }
 
 func ExecCommandInDir(cmd *exec.Cmd, dir string) error {
@@ -107,30 +196,6 @@ func ExecCommandInDir(cmd *exec.Cmd, dir string) error {
 	}
 
 	return nil
-}
-
-func ExecCommand(cmdName string, args ...string) error {
-	cmd := exec.Command(cmdName, args...)
-	log.Info().Str("cmd", cmd.String()).Msg("exec command")
-
-	// print output with colors
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// add cmd dir path to PATH
-	PATH := fmt.Sprintf("%s:%s", filepath.Dir(cmdName), os.Getenv("PATH"))
-	if err := os.Setenv("PATH", PATH); err != nil {
-		log.Error().Err(err).Msg("failed to add cmd dir path to $PATH")
-		return err
-	}
-
-	err := cmd.Run()
-	if err != nil {
-		log.Error().Err(err).Msg("exec command failed")
-		return err
-	}
-
-	return err
 }
 
 func CreateFolder(folderPath string) error {
@@ -281,11 +346,12 @@ var ErrUnsupportedFileExt = fmt.Errorf("unsupported file extension")
 // LoadFile loads file content with file extension and assigns to structObj
 func LoadFile(path string, structObj interface{}) (err error) {
 	log.Info().Str("path", path).Msg("load file")
-	file, err := readFile(path)
+	file, err := ReadFile(path)
 	if err != nil {
 		return errors.Wrap(err, "read file failed")
 	}
-
+	// remove BOM at the beginning of file
+	file = bytes.TrimLeft(file, "\xef\xbb\xbf")
 	ext := filepath.Ext(path)
 	switch ext {
 	case ".json", ".har":
@@ -294,15 +360,47 @@ func LoadFile(path string, structObj interface{}) (err error) {
 		err = decoder.Decode(structObj)
 	case ".yaml", ".yml":
 		err = yaml.Unmarshal(file, structObj)
+	case ".env":
+		err = parseEnvContent(file, structObj)
 	default:
 		err = ErrUnsupportedFileExt
 	}
 	return err
 }
 
+func parseEnvContent(file []byte, obj interface{}) error {
+	envMap := obj.(map[string]string)
+	lines := strings.Split(string(file), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			// empty line or comment line
+			continue
+		}
+		var kv []string
+		if strings.Contains(line, "=") {
+			kv = strings.SplitN(line, "=", 2)
+		} else if strings.Contains(line, ":") {
+			kv = strings.SplitN(line, ":", 2)
+		}
+		if len(kv) != 2 {
+			return errors.New(".env format error")
+		}
+
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+		envMap[key] = value
+
+		// set env
+		log.Info().Str("key", key).Msg("set env")
+		os.Setenv(key, value)
+	}
+	return nil
+}
+
 func loadFromCSV(path string) []map[string]interface{} {
 	log.Info().Str("path", path).Msg("load csv file")
-	file, err := readFile(path)
+	file, err := ReadFile(path)
 	if err != nil {
 		log.Error().Err(err).Msg("read csv file failed")
 		os.Exit(1)
@@ -328,7 +426,7 @@ func loadFromCSV(path string) []map[string]interface{} {
 
 func loadMessage(path string) []byte {
 	log.Info().Str("path", path).Msg("load message file")
-	file, err := readFile(path)
+	file, err := ReadFile(path)
 	if err != nil {
 		log.Error().Err(err).Msg("read message file failed")
 		os.Exit(1)
@@ -336,7 +434,7 @@ func loadMessage(path string) []byte {
 	return file
 }
 
-func readFile(path string) ([]byte, error) {
+func ReadFile(path string) ([]byte, error) {
 	var err error
 	path, err = filepath.Abs(path)
 	if err != nil {
@@ -350,4 +448,10 @@ func readFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	return file, nil
+}
+
+func GetFileNameWithoutExtension(path string) string {
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	return base[0 : len(base)-len(ext)]
 }

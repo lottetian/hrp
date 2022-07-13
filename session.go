@@ -61,6 +61,10 @@ func (r *SessionRunner) GetConfig() *TConfig {
 	return r.parsedConfig
 }
 
+func (r *SessionRunner) HTTPStatOn() bool {
+	return r.hrpRunner.httpStatOn
+}
+
 func (r *SessionRunner) LogOn() bool {
 	return r.hrpRunner.requestsLogOn
 }
@@ -71,21 +75,28 @@ func (r *SessionRunner) Start(givenVars map[string]interface{}) error {
 	config := r.testCase.Config
 	log.Info().Str("testcase", config.Name).Msg("run testcase start")
 
-	// update config variables with given variables
-	r.updateConfigVariables(givenVars)
-
 	// reset session runner
 	r.resetSession()
 
+	// update config variables with given variables
+	r.updateSessionVariables(givenVars)
+
 	// run step in sequential order
 	for _, step := range r.testCase.TestSteps {
-		log.Info().Str("step", step.Name()).
+		// parse step name
+		parsedName, err := r.parser.ParseString(step.Name(), r.sessionVariables)
+		if err != nil {
+			parsedName = step.Name()
+		}
+		stepName := convertString(parsedName)
+		log.Info().Str("step", stepName).
 			Str("type", string(step.Type())).Msg("run step start")
 
 		// reset step http client
 		r.resetHttpClient()
 
 		stepResult, err := step.Run(r)
+		stepResult.Name = stepName
 		if err != nil {
 			log.Error().
 				Str("step", stepResult.Name).
@@ -144,16 +155,16 @@ func (r *SessionRunner) MergeStepVariables(vars map[string]interface{}) (map[str
 	return parsedVariables, nil
 }
 
-// updateConfigVariables updates config variables with given variables.
+// updateSessionVariables updates session variables with given variables.
 // this is used for data driven
-func (r *SessionRunner) updateConfigVariables(parameters map[string]interface{}) {
+func (r *SessionRunner) updateSessionVariables(parameters map[string]interface{}) {
 	if len(parameters) == 0 {
 		return
 	}
 
-	log.Info().Interface("parameters", parameters).Msg("update config variables")
+	log.Info().Interface("parameters", parameters).Msg("update session variables")
 	for k, v := range parameters {
-		r.parsedConfig.Variables[k] = v
+		r.sessionVariables[k] = v
 	}
 }
 

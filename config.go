@@ -3,12 +3,14 @@ package hrp
 import (
 	"github.com/lottetian/hrp/internal/builtin"
 	"reflect"
+	"time"
 )
 
 // NewConfig returns a new constructed testcase config with specified testcase name.
 func NewConfig(name string) *TConfig {
 	return &TConfig{
 		Name:      name,
+		Environs:  make(map[string]string),
 		Variables: make(map[string]interface{}),
 	}
 }
@@ -18,13 +20,15 @@ func NewConfig(name string) *TConfig {
 type TConfig struct {
 	Name              string                 `json:"name" yaml:"name"` // required
 	Verify            bool                   `json:"verify,omitempty" yaml:"verify,omitempty"`
-	BaseURL           string                 `json:"base_url,omitempty" yaml:"base_url,omitempty"`
-	Headers           map[string]string      `json:"headers,omitempty" yaml:"headers,omitempty"`
-	Variables         map[string]interface{} `json:"variables,omitempty" yaml:"variables,omitempty"`
+	BaseURL           string                 `json:"base_url,omitempty" yaml:"base_url,omitempty"`   // deprecated in v4.1, moved to env
+	Headers           map[string]string      `json:"headers,omitempty" yaml:"headers,omitempty"`     // public request headers
+	Environs          map[string]string      `json:"environs,omitempty" yaml:"environs,omitempty"`   // environment variables
+	Variables         map[string]interface{} `json:"variables,omitempty" yaml:"variables,omitempty"` // global variables
 	Parameters        map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
 	ParametersSetting *TParamsConfig         `json:"parameters_setting,omitempty" yaml:"parameters_setting,omitempty"`
 	ThinkTimeSetting  *ThinkTimeConfig       `json:"think_time,omitempty" yaml:"think_time,omitempty"`
 	WebSocketSetting  *WebSocketConfig       `json:"websocket,omitempty" yaml:"websocket,omitempty"`
+	Timeout           float64                `json:"timeout,omitempty" yaml:"timeout,omitempty"` // global timeout in seconds
 	Export            []string               `json:"export,omitempty" yaml:"export,omitempty"`
 	Weight            int                    `json:"weight,omitempty" yaml:"weight,omitempty"`
 	Path              string                 `json:"path,omitempty" yaml:"path,omitempty"` // testcase file path
@@ -69,6 +73,12 @@ func (c *TConfig) WithParameters(parameters map[string]interface{}) *TConfig {
 // SetThinkTime sets think time config for current testcase.
 func (c *TConfig) SetThinkTime(strategy thinkTimeStrategy, cfg interface{}, limit float64) *TConfig {
 	c.ThinkTimeSetting = &ThinkTimeConfig{strategy, cfg, limit}
+	return c
+}
+
+// SetTimeout sets testcase timeout in seconds.
+func (c *TConfig) SetTimeout(timeout time.Duration) *TConfig {
+	c.Timeout = timeout.Seconds()
 	return c
 }
 
@@ -166,6 +176,4 @@ const (
 	thinkTimeDefaultMultiply = 1
 )
 
-var (
-	thinkTimeDefaultRandom = map[string]float64{"min_percentage": 0.5, "max_percentage": 1.5}
-)
+var thinkTimeDefaultRandom = map[string]float64{"min_percentage": 0.5, "max_percentage": 1.5}

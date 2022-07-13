@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"crypto/tls"
 	"fmt"
+	"github.com/lottetian/hrp/internal/httpstat"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -12,9 +14,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/fatih/color"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
@@ -46,9 +50,10 @@ type Request struct {
 	Body           interface{}            `json:"body,omitempty" yaml:"body,omitempty"`
 	Json           interface{}            `json:"json,omitempty" yaml:"json,omitempty"`
 	Data           interface{}            `json:"data,omitempty" yaml:"data,omitempty"`
-	Timeout        float32                `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Timeout        float64                `json:"timeout,omitempty" yaml:"timeout,omitempty"` // timeout in seconds
 	AllowRedirects bool                   `json:"allow_redirects,omitempty" yaml:"allow_redirects,omitempty"`
 	Verify         bool                   `json:"verify,omitempty" yaml:"verify,omitempty"`
+	Upload         map[string]interface{} `json:"upload,omitempty" yaml:"upload,omitempty"`
 }
 
 func newRequestBuilder(parser *Parser, config *TConfig, stepRequest *Request) *requestBuilder {
@@ -122,7 +127,7 @@ func (r *requestBuilder) prepareHeaders(stepVariables map[string]interface{}) er
 		}
 		r.req.AddCookie(&http.Cookie{
 			Name:  cookieName,
-			Value: fmt.Sprintf("%v", value),
+			Value: convertString(value),
 		})
 	}
 
@@ -142,7 +147,11 @@ func (r *requestBuilder) prepareUrlParams(stepVariables map[string]interface{}) 
 		log.Error().Err(err).Msg("parse request url failed")
 		return err
 	}
-	rawUrl := buildURL(r.config.BaseURL, convertString(requestUrl))
+	var baseURL string
+	if stepVariables["base_url"] != nil {
+		baseURL = stepVariables["base_url"].(string)
+	}
+	rawUrl := buildURL(baseURL, convertString(requestUrl))
 
 	// prepare request params
 	var queryParams url.Values
@@ -156,7 +165,7 @@ func (r *requestBuilder) prepareUrlParams(stepVariables map[string]interface{}) 
 		if len(parsedParams) > 0 {
 			queryParams = make(url.Values)
 			for k, v := range parsedParams {
-				queryParams.Add(k, fmt.Sprint(v))
+				queryParams.Add(k, convertString(v))
 			}
 		}
 	}
@@ -210,7 +219,7 @@ func (r *requestBuilder) prepareBody(stepVariables map[string]interface{}) error
 			// post form data
 			formData := make(url.Values)
 			for k, v := range vv {
-				formData.Add(k, fmt.Sprint(v))
+				formData.Add(k, convertString(v))
 			}
 			dataBytes = []byte(formData.Encode())
 		} else {
@@ -239,6 +248,8 @@ func (r *requestBuilder) prepareBody(stepVariables map[string]interface{}) error
 		dataBytes = vv
 	case bytes.Buffer:
 		dataBytes = vv.Bytes()
+	case *builtin.TFormWriter:
+		dataBytes = vv.Payload.Bytes()
 	default: // unexpected body type
 		return errors.New("unexpected request body type")
 	}
@@ -247,6 +258,31 @@ func (r *requestBuilder) prepareBody(stepVariables map[string]interface{}) error
 	r.req.ContentLength = int64(len(dataBytes))
 
 	return nil
+}
+
+func initUpload(step *TStep) {
+	if step.Request.Headers == nil {
+		step.Request.Headers = make(map[string]string)
+	}
+	step.Request.Headers["Content-Type"] = "${multipart_content_type($m_encoder)}"
+	step.Request.Body = "$m_encoder"
+}
+
+func prepareUpload(parser *Parser, step *TStep, stepVariables map[string]interface{}) (err error) {
+	if step.Request.Upload == nil {
+		return
+	}
+	uploadMap, err := parser.Parse(step.Request.Upload, stepVariables)
+	if err != nil {
+		return
+	}
+	stepVariables["m_upload"] = uploadMap
+	mEncoder, err := parser.Parse("${multipart_encoder($m_upload)}", stepVariables)
+	if err != nil {
+		return
+	}
+	stepVariables["m_encoder"] = mEncoder
+	return
 }
 
 func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
@@ -262,10 +298,25 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 		if err != nil {
 			stepResult.Attachment = err.Error()
 		}
+		// update summary
+		r.summary.Records = append(r.summary.Records, stepResult)
+		r.summary.Stat.Total += 1
+		if stepResult.Success {
+			r.summary.Stat.Successes += 1
+		} else {
+			r.summary.Stat.Failures += 1
+			// update summary result to failed
+			r.summary.Success = false
+		}
 	}()
 
 	// override step variables
 	stepVariables, err := r.MergeStepVariables(step.Variables)
+	if err != nil {
+		return
+	}
+
+	err = prepareUpload(r.parser, step, stepVariables)
 	if err != nil {
 		return
 	}
@@ -311,23 +362,31 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 		}
 	}
 
-	// do request action
-	start := time.Now()
-	var resp *http.Response
-	if step.Request.HTTP2 {
-		resp, err = r.hrpRunner.http2Client.Do(rb.req)
-	} else {
-		resp, err = r.hrpRunner.httpClient.Do(rb.req)
+	// stat HTTP request
+	var httpStat httpstat.Stat
+	if r.HTTPStatOn() {
+		ctx := httpstat.WithHTTPStat(rb.req, &httpStat)
+		rb.req = rb.req.WithContext(ctx)
 	}
 
-	stepResult.Elapsed = time.Since(start).Milliseconds()
+	// select HTTP client
+	var client *http.Client
+	if step.Request.HTTP2 {
+		client = r.hrpRunner.http2Client
+	} else {
+		client = r.hrpRunner.httpClient
+	}
+
+	// set step timeout
+	if step.Request.Timeout != 0 {
+		client.Timeout = time.Duration(step.Request.Timeout*1000) * time.Millisecond
+	}
+
+	// do request action
+	start := time.Now()
+	resp, err := client.Do(rb.req)
 	if err != nil {
-		traceId, ok := rb.req.Header["Cloud-Trace-Id"]
-		if ok {
-			return stepResult, errors.Wrap(err, "do request failed, traceId : "+traceId[0])
-		} else {
-			return stepResult, errors.Wrap(err, "do request failed")
-		}
+		return stepResult, errors.Wrap(err, "do request failed")
 	}
 	defer resp.Body.Close()
 
@@ -351,6 +410,14 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 		return
 	}
 
+	stepResult.Elapsed = time.Since(start).Milliseconds()
+	if r.HTTPStatOn() {
+		// resp.Body has been ReadAll
+		httpStat.Finish()
+		stepResult.HttpStat = httpStat.Durations()
+		httpStat.Print()
+	}
+
 	// add response object to step variables, could be used in teardown hooks
 	stepVariables["hrp_step_response"] = respObj.respObjMeta
 
@@ -367,7 +434,7 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 
 	// extract variables from response
 	extractors := step.Extract
-	extractMapping := respObj.Extract(extractors)
+	extractMapping := respObj.Extract(extractors, stepVariables)
 	stepResult.ExportVars = extractMapping
 
 	// override step variables with extracted variables
@@ -383,31 +450,60 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	stepResult.ContentSize = resp.ContentLength
 	stepResult.Data = sessionData
 
-	// update summary
-	r.summary.Records = append(r.summary.Records, stepResult)
-	r.summary.Stat.Total += 1
-	if stepResult.Success {
-		r.summary.Stat.Successes += 1
-	} else {
-		r.summary.Stat.Failures += 1
-		// update summary result to failed
-		r.summary.Success = false
-	}
-
 	return stepResult, err
 }
 
 func runStepRequestWithTimes(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
+	times, _ := strconv.Atoi(step.Times)
+	current := step.Current
+	if err != nil {
+		log.Info().Str("step", step.Name).Msg("run step start")
+		return runStepRequest(r, step)
+	}
+	if current {
+		return runStepRequestWithCurrentTimes(r, step)
+	} else {
+		for i := 0; i < times; i++ {
+			log.Info().Str("step", step.Name).Msg("run step start at " + strconv.Itoa(i+1) + " times")
+			stepResult, err := runStepRequest(r, step)
+			if err == nil {
+				return stepResult, nil
+			}
+		}
+	}
+	return stepResult, err
+}
+
+func runStepRequestWithCurrentTimes(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
 	times, err := strconv.Atoi(step.Times)
 	if err != nil {
 		log.Info().Str("step", step.Name).Msg("run step start")
 		return runStepRequest(r, step)
 	}
+	resultChan := make(chan *StepResult, times)
+	errChan := make(chan error, times)
+	defer func() {
+		close(resultChan)
+		close(errChan)
+	}()
+	var wg sync.WaitGroup
 	for i := 0; i < times; i++ {
-		log.Info().Str("step", step.Name).Msg("run step start at " + strconv.Itoa(i+1) + " times")
-		stepResult, err := runStepRequest(r, step)
+		wg.Add(1)
+		go func() {
+			stepResult, err := runStepRequest(r, step)
+			resultChan <- stepResult
+			errChan <- err
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	select {
+	case outStepResult := <-resultChan:
+		stepResult = outStepResult
+	case outErr := <-errChan:
+		err = outErr
 		if err == nil {
-			return stepResult, nil
+			return stepResult, err
 		}
 	}
 	return stepResult, err
@@ -429,8 +525,22 @@ func printRequest(req *http.Request) error {
 	return nil
 }
 
+func printf(format string, a ...interface{}) (n int, err error) {
+	return fmt.Fprintf(color.Output, format, a...)
+}
+
 func printResponse(resp *http.Response) error {
 	fmt.Println("==================== response ====================")
+	connectedVia := "plaintext"
+	if resp.TLS != nil {
+		switch resp.TLS.Version {
+		case tls.VersionTLS12:
+			connectedVia = "TLSv1.2"
+		case tls.VersionTLS13:
+			connectedVia = "TLSv1.3"
+		}
+	}
+	printf("%s %s\n", color.CyanString("Connected via"), color.BlueString("%s", connectedVia))
 	respContentType := resp.Header.Get("Content-Type")
 	printBody := shouldPrintBody(respContentType)
 	respDump, err := httputil.DumpResponse(resp, printBody)
@@ -513,6 +623,14 @@ func (s *StepRequest) SetupHook(hook string) *StepRequest {
 // SetTimes sets running times.
 func (s *StepRequest) SetTimes(times string) *StepRequest {
 	s.step.Times = times
+	return &StepRequest{
+		step: s.step,
+	}
+}
+
+// SetCurrent sets current running
+func (s *StepRequest) SetCurrent(current bool) *StepRequest {
+	s.step.Current = current
 	return &StepRequest{
 		step: s.step,
 	}
@@ -721,30 +839,35 @@ type StepRequestWithOptionalArgs struct {
 
 // SetVerify sets whether to verify SSL for current HTTP request.
 func (s *StepRequestWithOptionalArgs) SetVerify(verify bool) *StepRequestWithOptionalArgs {
+	log.Info().Bool("verify", verify).Msg("set step request verify")
 	s.step.Request.Verify = verify
 	return s
 }
 
 // SetTimeout sets timeout for current HTTP request.
-func (s *StepRequestWithOptionalArgs) SetTimeout(timeout float32) *StepRequestWithOptionalArgs {
-	s.step.Request.Timeout = timeout
+func (s *StepRequestWithOptionalArgs) SetTimeout(timeout time.Duration) *StepRequestWithOptionalArgs {
+	log.Info().Float64("timeout(seconds)", timeout.Seconds()).Msg("set step request timeout")
+	s.step.Request.Timeout = timeout.Seconds()
 	return s
 }
 
 // SetProxies sets proxies for current HTTP request.
 func (s *StepRequestWithOptionalArgs) SetProxies(proxies map[string]string) *StepRequestWithOptionalArgs {
+	log.Info().Interface("proxies", proxies).Msg("set step request proxies")
 	// TODO
 	return s
 }
 
 // SetAllowRedirects sets whether to allow redirects for current HTTP request.
 func (s *StepRequestWithOptionalArgs) SetAllowRedirects(allowRedirects bool) *StepRequestWithOptionalArgs {
+	log.Info().Bool("allowRedirects", allowRedirects).Msg("set step request allowRedirects")
 	s.step.Request.AllowRedirects = allowRedirects
 	return s
 }
 
 // SetAuth sets auth for current HTTP request.
 func (s *StepRequestWithOptionalArgs) SetAuth(auth map[string]string) *StepRequestWithOptionalArgs {
+	log.Info().Interface("auth", auth).Msg("set step request auth")
 	// TODO
 	return s
 }
@@ -770,6 +893,14 @@ func (s *StepRequestWithOptionalArgs) WithCookies(cookies map[string]string) *St
 // WithBody sets HTTP request body for current step.
 func (s *StepRequestWithOptionalArgs) WithBody(body interface{}) *StepRequestWithOptionalArgs {
 	s.step.Request.Body = body
+	return s
+}
+
+// WithUpload sets HTTP request body for uploading file(s).
+func (s *StepRequestWithOptionalArgs) WithUpload(upload map[string]interface{}) *StepRequestWithOptionalArgs {
+	// init upload
+	initUpload(s.step)
+	s.step.Request.Upload = upload
 	return s
 }
 
@@ -1053,6 +1184,17 @@ func (s *StepRequestValidation) AssertStringEqual(jmesPath string, expected inte
 	v := Validator{
 		Check:   jmesPath,
 		Assert:  "string_equals",
+		Expect:  expected,
+		Message: msg,
+	}
+	s.step.Validators = append(s.step.Validators, v)
+	return s
+}
+
+func (s *StepRequestValidation) AssertEqualFold(jmesPath string, expected interface{}, msg string) *StepRequestValidation {
+	v := Validator{
+		Check:   jmesPath,
+		Assert:  "equal_fold",
 		Expect:  expected,
 		Message: msg,
 	}

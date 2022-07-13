@@ -5,10 +5,12 @@ go 1.17
 require (
 	github.com/andybalholm/brotli v1.0.4
 	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/fatih/color v1.13.0
 	github.com/getsentry/sentry-go v0.13.0
+	//github.com/go-openapi/spec v0.20.6
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.4.1
-	github.com/httprunner/funplugin v0.4.3
+	github.com/httprunner/funplugin v0.5.0
 	github.com/jinzhu/copier v0.3.2
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/json-iterator/go v1.1.12
@@ -21,7 +23,7 @@ require (
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
 	gonum.org/v1/gonum v0.11.0
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	gopkg.in/yaml.v3 v3.0.0
 )
 
 require (
@@ -29,7 +31,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/fatih/color v1.7.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/hashicorp/go-hclog v1.1.0 // indirect
 	github.com/hashicorp/go-plugin v1.4.3 // indirect

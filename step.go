@@ -17,6 +17,7 @@ type StepResult struct {
 	StepType    StepType               `json:"step_type" yaml:"step_type"`                         // step type, testcase/request/transaction/rendezvous
 	Success     bool                   `json:"success" yaml:"success"`                             // step execution result
 	Elapsed     int64                  `json:"elapsed_ms" yaml:"elapsed_ms"`                       // step execution time in millisecond(ms)
+	HttpStat    map[string]int64       `json:"httpstat,omitempty" yaml:"httpstat,omitempty"`       // httpstat in millisecond(ms)
 	Data        interface{}            `json:"data,omitempty" yaml:"data,omitempty"`               // session data or slice of step data
 	ContentSize int64                  `json:"content_size" yaml:"content_size"`                   // response body length
 	ExportVars  map[string]interface{} `json:"export_vars,omitempty" yaml:"export_vars,omitempty"` // extract variables
@@ -35,6 +36,7 @@ type TStep struct {
 	ThinkTime     *ThinkTime             `json:"think_time,omitempty" yaml:"think_time,omitempty"`
 	WebSocket     *WebSocketAction       `json:"websocket,omitempty" yaml:"websocket,omitempty"`
 	Times         string                 `json:"times,omitempty" yaml:"times,omitempty"`
+	Current       bool                   `json:"current,omitempty" yaml:"current,omitempty"`
 	Variables     map[string]interface{} `json:"variables,omitempty" yaml:"variables,omitempty"`
 	SetupHooks    []string               `json:"setup_hooks,omitempty" yaml:"setup_hooks,omitempty"`
 	TeardownHooks []string               `json:"teardown_hooks,omitempty" yaml:"teardown_hooks,omitempty"`

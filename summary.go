@@ -72,7 +72,7 @@ func (s *Summary) genHTMLReport() error {
 	}
 
 	reportPath := filepath.Join(reportsDir, fmt.Sprintf("report-%v.html", s.Time.StartAt.Unix()))
-	file, err := os.OpenFile(reportPath, os.O_WRONLY|os.O_CREATE, 0666)
+	file, err := os.OpenFile(reportPath, os.O_WRONLY|os.O_CREATE, 0o666)
 	if err != nil {
 		log.Error().Err(err).Msg("open file failed")
 		return err
@@ -198,5 +198,6 @@ func newSummary() *TestCaseSummary {
 		Stat:    &TestStepStat{},
 		Time:    &TestCaseTime{},
 		InOut:   &TestCaseInOut{},
+		Records: []*StepResult{},
 	}
 }

@@ -237,6 +237,16 @@ func runStepWebSocket(r *SessionRunner, step *TStep) (stepResult *StepResult, er
 		if err != nil {
 			stepResult.Attachment = err.Error()
 		}
+		// update summary
+		r.summary.Records = append(r.summary.Records, stepResult)
+		r.summary.Stat.Total += 1
+		if stepResult.Success {
+			r.summary.Stat.Successes += 1
+		} else {
+			r.summary.Stat.Failures += 1
+			// update summary result to failed
+			r.summary.Success = false
+		}
 	}()
 
 	// override step variables
@@ -363,7 +373,7 @@ func runStepWebSocket(r *SessionRunner, step *TStep) (stepResult *StepResult, er
 
 		// extract variables from response
 		extractors := step.Extract
-		extractMapping := respObj.Extract(extractors)
+		extractMapping := respObj.Extract(extractors, stepVariables)
 		stepResult.ExportVars = extractMapping
 
 		// override step variables with extracted variables
@@ -383,16 +393,6 @@ func runStepWebSocket(r *SessionRunner, step *TStep) (stepResult *StepResult, er
 		stepResult.Success = true
 	}
 
-	// update summary
-	r.summary.Records = append(r.summary.Records, stepResult)
-	r.summary.Stat.Total += 1
-	if stepResult.Success {
-		r.summary.Stat.Successes += 1
-	} else {
-		r.summary.Stat.Failures += 1
-		// update summary result to failed
-		r.summary.Success = false
-	}
 	return stepResult, nil
 }
 

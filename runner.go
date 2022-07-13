@@ -4,7 +4,9 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,6 +30,7 @@ func NewRunner(t *testing.T) *HRPRunner {
 	if t == nil {
 		t = &testing.T{}
 	}
+	jar, _ := cookiejar.New(nil)
 	return &HRPRunner{
 		t:             t,
 		failfast:      true, // default to failfast
@@ -36,13 +39,14 @@ func NewRunner(t *testing.T) *HRPRunner {
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			},
-			Timeout: 30 * time.Second,
+			Jar:     jar, // insert response cookies into request
+			Timeout: 120 * time.Second,
 		},
 		http2Client: &http.Client{
 			Transport: &http2.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			},
-			Timeout: 30 * time.Second,
+			Timeout: 120 * time.Second,
 		},
 		// use default handshake timeout (no timeout limit) here, enable timeout at step level
 		wsDialer: &websocket.Dialer{
@@ -54,8 +58,10 @@ func NewRunner(t *testing.T) *HRPRunner {
 type HRPRunner struct {
 	t             *testing.T
 	failfast      bool
+	httpStatOn    bool
 	requestsLogOn bool
 	pluginLogOn   bool
+	venv          string
 	saveTests     bool
 	genHTMLReport bool
 	httpClient    *http.Client
@@ -100,10 +106,24 @@ func (r *HRPRunner) SetRequestsLogOn() *HRPRunner {
 	return r
 }
 
+// SetHTTPStatOn turns on HTTP latency stat.
+func (r *HRPRunner) SetHTTPStatOn() *HRPRunner {
+	log.Info().Msg("[init] SetHTTPStatOn")
+	r.httpStatOn = true
+	return r
+}
+
 // SetPluginLogOn turns on plugin logging.
 func (r *HRPRunner) SetPluginLogOn() *HRPRunner {
 	log.Info().Msg("[init] SetPluginLogOn")
 	r.pluginLogOn = true
+	return r
+}
+
+// SetPython3Venv specifies python3 venv.
+func (r *HRPRunner) SetPython3Venv(venv string) *HRPRunner {
+	log.Info().Str("venv", venv).Msg("[init] SetPython3Venv")
+	r.venv = venv
 	return r
 }
 
@@ -120,6 +140,13 @@ func (r *HRPRunner) SetProxyUrl(proxyUrl string) *HRPRunner {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	r.wsDialer.Proxy = http.ProxyURL(p)
+	return r
+}
+
+// SetTimeout configures global timeout in seconds.
+func (r *HRPRunner) SetTimeout(timeout time.Duration) *HRPRunner {
+	log.Info().Float64("timeout(seconds)", timeout.Seconds()).Msg("[init] SetTimeout")
+	r.httpClient.Timeout = timeout
 	return r
 }
 
@@ -157,6 +184,7 @@ func (r *HRPRunner) Run(testcases ...ITestCase) error {
 		return err
 	}
 
+	var runErr error
 	// run testcase one by one
 	for _, testcase := range testCases {
 		sessionRunner, err := r.NewSessionRunner(testcase)
@@ -171,12 +199,14 @@ func (r *HRPRunner) Run(testcases ...ITestCase) error {
 		}()
 
 		for it := sessionRunner.parametersIterator; it.HasNext(); {
-			if err = sessionRunner.Start(it.Next()); err != nil {
-				log.Error().Err(err).Msg("[Run] run testcase failed")
-				return err
-			}
+			err = sessionRunner.Start(it.Next())
 			caseSummary := sessionRunner.GetSummary()
 			s.appendCaseSummary(caseSummary)
+			if err != nil {
+				log.Error().Err(err).Msg("[Run] run testcase failed")
+				runErr = err
+				break
+			}
 		}
 	}
 	s.Time.Duration = time.Since(s.Time.StartAt).Seconds()
@@ -196,7 +226,8 @@ func (r *HRPRunner) Run(testcases ...ITestCase) error {
 			return err
 		}
 	}
-	return nil
+
+	return runErr
 }
 
 // NewSessionRunner creates a new session runner for testcase.
@@ -222,16 +253,24 @@ func (r *HRPRunner) newCaseRunner(testcase *TestCase) (*testCaseRunner, error) {
 	}
 
 	// init parser plugin
-	plugin, pluginDir, err := initPlugin(testcase.Config.Path, r.pluginLogOn)
+	plugin, err := initPlugin(testcase.Config.Path, r.venv, r.pluginLogOn)
 	if err != nil {
 		return nil, errors.Wrap(err, "init plugin failed")
 	}
-	runner.parser.plugin = plugin
-	runner.rootDir = pluginDir
+	if plugin != nil {
+		runner.parser.plugin = plugin
+		runner.rootDir = filepath.Dir(plugin.Path())
+	}
 
 	// parse testcase config
 	if err := runner.parseConfig(); err != nil {
 		return nil, errors.Wrap(err, "parse testcase config failed")
+	}
+
+	// set testcase timeout in seconds
+	if runner.testCase.Config.Timeout != 0 {
+		timeout := time.Duration(runner.testCase.Config.Timeout*1000) * time.Millisecond
+		runner.hrpRunner.SetTimeout(timeout)
 	}
 
 	return runner, nil
@@ -278,6 +317,25 @@ func (r *testCaseRunner) parseConfig() error {
 		return errors.Wrap(err, "parse config base url failed")
 	}
 	r.parsedConfig.BaseURL = convertString(parsedBaseURL)
+
+	// merge config environment variables with base_url
+	// priority: env base_url > base_url
+	if cfg.Environs != nil {
+		r.parsedConfig.Environs = cfg.Environs
+	} else {
+		r.parsedConfig.Environs = make(map[string]string)
+	}
+	if value, ok := r.parsedConfig.Environs["base_url"]; !ok || value == "" {
+		if r.parsedConfig.BaseURL != "" {
+			r.parsedConfig.Environs["base_url"] = r.parsedConfig.BaseURL
+		}
+	}
+
+	// merge config variables with environment variables
+	// priority: env > config variables
+	for k, v := range r.parsedConfig.Environs {
+		r.parsedConfig.Variables[k] = v
+	}
 
 	// ensure correction of think time config
 	r.parsedConfig.ThinkTimeSetting.checkThinkTime()

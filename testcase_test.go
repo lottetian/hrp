@@ -1,6 +1,7 @@
 package hrp
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,18 +14,21 @@ const (
 	hrpExamplesDir = "./examples/hrp"
 )
 
-var (
-	demoTestCaseWithPluginJSONPath    TestCasePath = templatesDir + "testcases/demo_with_funplugin.json"
-	demoTestCaseWithPluginYAMLPath    TestCasePath = templatesDir + "testcases/demo_with_funplugin.yaml"
-	demoTestCaseWithoutPluginJSONPath TestCasePath = templatesDir + "testcases/demo_without_funplugin.json"
-	demoTestCaseWithoutPluginYAMLPath TestCasePath = templatesDir + "testcases/demo_without_funplugin.yaml"
-	demoTestCaseWithRefAPIPath        TestCasePath = templatesDir + "testcases/demo_ref_api.json"
-	demoAPIGETPath                    APIPath      = templatesDir + "/api/get.yml"
-)
+// tmpl returns template file path
+func tmpl(relativePath string) string {
+	return filepath.Join("internal/scaffold/templates/", relativePath)
+}
 
 var (
-	demoTestCaseWithThinkTimePath TestCasePath = hrpExamplesDir + "/think_time_test.json"
+	demoTestCaseWithPluginJSONPath    = tmpl("testcases/demo_with_funplugin.json")
+	demoTestCaseWithPluginYAMLPath    = tmpl("testcases/demo_with_funplugin.yaml")
+	demoTestCaseWithoutPluginJSONPath = tmpl("testcases/demo_without_funplugin.json")
+	demoTestCaseWithoutPluginYAMLPath = tmpl("testcases/demo_without_funplugin.yaml")
+	demoTestCaseWithRefAPIPath        = tmpl("testcases/demo_ref_api.json")
+	demoAPIGETPath                    = tmpl("/api/get.yml")
 )
+
+var demoTestCaseWithThinkTimePath TestCasePath = hrpExamplesDir + "/think_time_test.json"
 
 var demoTestCaseWithPlugin = &TestCase{
 	Config: NewConfig("demo with complex mechanisms").
@@ -154,21 +158,21 @@ var demoTestCaseWithoutPlugin = &TestCase{
 
 func TestGenDemoTestCase(t *testing.T) {
 	tCase := demoTestCaseWithPlugin.ToTCase()
-	err := builtin.Dump2JSON(tCase, demoTestCaseWithPluginJSONPath.GetPath())
+	err := builtin.Dump2JSON(tCase, demoTestCaseWithPluginJSONPath)
 	if err != nil {
 		t.Fatal()
 	}
-	err = builtin.Dump2YAML(tCase, demoTestCaseWithPluginYAMLPath.GetPath())
+	err = builtin.Dump2YAML(tCase, demoTestCaseWithPluginYAMLPath)
 	if err != nil {
 		t.Fatal()
 	}
 
 	tCase = demoTestCaseWithoutPlugin.ToTCase()
-	err = builtin.Dump2JSON(tCase, demoTestCaseWithoutPluginJSONPath.GetPath())
+	err = builtin.Dump2JSON(tCase, demoTestCaseWithoutPluginJSONPath)
 	if err != nil {
 		t.Fatal()
 	}
-	err = builtin.Dump2YAML(tCase, demoTestCaseWithoutPluginYAMLPath.GetPath())
+	err = builtin.Dump2YAML(tCase, demoTestCaseWithoutPluginYAMLPath)
 	if err != nil {
 		t.Fatal()
 	}
@@ -177,11 +181,11 @@ func TestGenDemoTestCase(t *testing.T) {
 func TestLoadCase(t *testing.T) {
 	tcJSON := &TCase{}
 	tcYAML := &TCase{}
-	err := builtin.LoadFile(demoTestCaseWithPluginJSONPath.GetPath(), tcJSON)
+	err := builtin.LoadFile(demoTestCaseWithPluginJSONPath, tcJSON)
 	if !assert.NoError(t, err) {
 		t.Fatal()
 	}
-	err = builtin.LoadFile(demoTestCaseWithPluginYAMLPath.GetPath(), tcYAML)
+	err = builtin.LoadFile(demoTestCaseWithPluginYAMLPath, tcYAML)
 	if !assert.NoError(t, err) {
 		t.Fatal()
 	}
@@ -207,21 +211,20 @@ func TestConvertCheckExpr(t *testing.T) {
 	}{
 		// normal check expression
 		{"a.b.c", "a.b.c"},
-		{"headers.\"Content-Type\"", "headers.\"Content-Type\""},
+		{"a.\"b-c\".d", "a.\"b-c\".d"},
+		{"a.b-c.d", "a.b-c.d"},
+		{"body.args.a[-1]", "body.args.a[-1]"},
 		// check expression using regex
 		{"covering (.*) testing,", "covering (.*) testing,"},
 		{" (.*) a-b-c", " (.*) a-b-c"},
 		// abnormal check expression
-		{"-", "\"-\""},
-		{"b-c", "\"b-c\""},
-		{"a.b-c.d", "a.\"b-c\".d"},
-		{"a-b.c-d", "\"a-b\".\"c-d\""},
-		{"\"a-b\".c-d", "\"a-b\".\"c-d\""},
 		{"headers.Content-Type", "headers.\"Content-Type\""},
-		{"body.I-am-a-Key.name", "body.\"I-am-a-Key\".name"},
+		{"headers.\"Content-Type", "headers.\"Content-Type\""},
+		{"headers.Content-Type\"", "headers.\"Content-Type\""},
+		{"headers.User-Agent", "headers.\"User-Agent\""},
 	}
 	for _, expr := range exprs {
-		if !assert.Equal(t, convertCheckExpr(expr.before), expr.after) {
+		if !assert.Equal(t, expr.after, convertJmespathExpr(expr.before)) {
 			t.Fatal()
 		}
 	}

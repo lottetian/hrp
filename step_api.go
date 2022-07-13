@@ -47,7 +47,11 @@ func (path *APIPath) ToAPI() (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 1. deal with request body compatibility
+	convertCompatRequestBody(api.Request)
+	// 2. deal with validators compatibility
 	err = convertCompatValidator(api.Validators)
+	// 3. deal with extract expr including hyphen
 	convertExtract(api.Extract)
 	return api, err
 }
@@ -113,6 +117,10 @@ func extendWithAPI(testStep *TStep, overriddenStep *API) {
 	}
 	// merge & override request
 	testStep.Request = overriddenStep.Request
+	// init upload
+	if testStep.Request.Upload != nil {
+		initUpload(testStep)
+	}
 	// merge & override variables
 	testStep.Variables = mergeVariables(testStep.Variables, overriddenStep.Variables)
 	// merge & override extractors
