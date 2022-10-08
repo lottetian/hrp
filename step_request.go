@@ -411,6 +411,10 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	}
 
 	stepResult.Elapsed = time.Since(start).Milliseconds()
+	if stepResult.Elapsed >= 6000 {
+		log.Error().Str("request time", step.Name).Msg("request cost: " + strconv.FormatInt(stepResult.Elapsed, 10))
+		log.Error().Str("trace id", step.Request.Headers["Cloud-Trace-Id"]).Msg("request trace id is : " + step.Request.Headers["Cloud-Trace-Id"])
+	}
 	if r.HTTPStatOn() {
 		// resp.Body has been ReadAll
 		httpStat.Finish()
