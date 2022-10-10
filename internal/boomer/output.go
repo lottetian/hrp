@@ -2,19 +2,21 @@ package boomer
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/olekukonko/tablewriter"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/rs/zerolog/log"
 
 	"github.com/lottetian/hrp/internal/json"
-	Stat "gonum.org/v1/gonum/stat"
 )
 
 // Output is primarily responsible for printing test results to different destinations
@@ -37,81 +39,11 @@ type Output interface {
 }
 
 // ConsoleOutput is the default output for standalone mode.
-type ConsoleOutput struct {
-}
+type ConsoleOutput struct{}
 
 // NewConsoleOutput returns a ConsoleOutput.
 func NewConsoleOutput() *ConsoleOutput {
 	return &ConsoleOutput{}
-}
-
-// added by LotteTian
-//fiftyResponseTime      float64 // 50%请求响应时间
-//ninetyResponseTime     float64 // 90%请求响应时间
-//ninetyFiveResponseTime float64 // 95%请求响应时间
-//ninetyNineResponseTime float64 // 99%请求响应时间
-func getFiftyResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
-	fiftyResponseTime := float64(0)
-	responseTimes, _ := url2responseTimes[name]
-	if len(responseTimes) != 0 {
-		var sortedKeys []float64
-		for k, v := range responseTimes {
-			for i := 0; i <= int(v); i++ {
-				sortedKeys = append(sortedKeys, float64(k))
-			}
-		}
-		sort.Float64s(sortedKeys)
-		fiftyResponseTime = Stat.Quantile(0.50, Stat.Empirical, sortedKeys, nil)
-	}
-	return fiftyResponseTime
-}
-
-func getNinetyResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
-	ninetyResponseTime := float64(0)
-	responseTimes, _ := url2responseTimes[name]
-	if len(responseTimes) != 0 {
-		var sortedKeys []float64
-		for k, v := range responseTimes {
-			for i := 0; i <= int(v); i++ {
-				sortedKeys = append(sortedKeys, float64(k))
-			}
-		}
-		sort.Float64s(sortedKeys)
-		ninetyResponseTime = Stat.Quantile(0.90, Stat.Empirical, sortedKeys, nil)
-	}
-	return ninetyResponseTime
-}
-
-func getNinetyFiveResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
-	ninetyFiveResponseTime := float64(0)
-	responseTimes, _ := url2responseTimes[name]
-	if len(responseTimes) != 0 {
-		var sortedKeys []float64
-		for k, v := range responseTimes {
-			for i := 0; i <= int(v); i++ {
-				sortedKeys = append(sortedKeys, float64(k))
-			}
-		}
-		sort.Float64s(sortedKeys)
-		ninetyFiveResponseTime = Stat.Quantile(0.95, Stat.Empirical, sortedKeys, nil)
-	}
-	return ninetyFiveResponseTime
-}
-
-func getNinetyNineResponseTime(url2responseTimes map[string]map[int64]int64, name string) float64 {
-	ninetyNineResponseTime := float64(0)
-	responseTimes, _ := url2responseTimes[name]
-	if len(responseTimes) != 0 {
-		var sortedKeys []float64
-		for k, v := range responseTimes {
-			for i := 0; i <= int(v); i++ {
-				sortedKeys = append(sortedKeys, float64(k))
-			}
-		}
-		sort.Float64s(sortedKeys)
-		ninetyNineResponseTime = Stat.Quantile(0.99, Stat.Empirical, sortedKeys, nil)
-	}
-	return ninetyNineResponseTime
 }
 
 func getMedianResponseTime(numRequests int64, responseTimes map[int64]int64) int64 {
@@ -171,12 +103,10 @@ func getTotalFailRatio(totalRequests, totalFailures int64) (failRatio float64) {
 
 // OnStart of ConsoleOutput has nothing to do.
 func (o *ConsoleOutput) OnStart() {
-
 }
 
 // OnStop of ConsoleOutput has nothing to do.
 func (o *ConsoleOutput) OnStop() {
-
 }
 
 // OnEvent will print to the console.
@@ -187,19 +117,7 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 		return
 	}
 
-	var state string
-	switch output.State {
-	case stateInit:
-		state = "initializing"
-	case stateSpawning:
-		state = "spawning"
-	case stateRunning:
-		state = "running"
-	case stateQuitting:
-		state = "quitting"
-	case stateStopped:
-		state = "stopped"
-	}
+	state := getStateName(output.State)
 
 	currentTime := time.Now()
 	println(fmt.Sprintf("Current time: %s, Users: %d, State: %s, Total RPS: %.1f, Total Average Response Time: %.1fms, Total Fail Ratio: %.1f%%",
@@ -207,10 +125,10 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 	println(fmt.Sprintf("Accumulated Transactions: %d Passed, %d Failed",
 		output.TransactionsPassed, output.TransactionsFailed))
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Type", "Name", "# requests", "# fails", "Median", "Average", "Min", "Max", "Content Size", "# reqs/sec", "# fails/sec", "50%", "90%", "95%", "99%"})
+	table.SetHeader([]string{"Type", "Name", "# requests", "# fails", "Median", "Average", "Min", "Max", "Content Size", "# reqs/sec", "# fails/sec"})
 
 	for _, stat := range output.Stats {
-		row := make([]string, 15)
+		row := make([]string, 11)
 		row[0] = stat.Method
 		row[1] = stat.Name
 		row[2] = strconv.FormatInt(stat.NumRequests, 10)
@@ -222,10 +140,6 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 		row[8] = strconv.FormatInt(stat.avgContentLength, 10)
 		row[9] = strconv.FormatFloat(stat.currentRps, 'f', 2, 64)
 		row[10] = strconv.FormatFloat(stat.currentFailPerSec, 'f', 2, 64)
-		row[11] = strconv.FormatFloat(stat.fiftyResponseTime, 'f', 2, 64)
-		row[12] = strconv.FormatFloat(stat.ninetyResponseTime, 'f', 2, 64)
-		row[13] = strconv.FormatFloat(stat.ninetyFiveResponseTime, 'f', 2, 64)
-		row[14] = strconv.FormatFloat(stat.ninetyNineResponseTime, 'f', 2, 64)
 		table.Append(row)
 	}
 	table.Render()
@@ -240,29 +154,28 @@ type statsEntryOutput struct {
 	avgContentLength   int64   // average content size
 	currentRps         float64 // # reqs/sec
 	currentFailPerSec  float64 // # fails/sec
-
-	// added by LotteTian
-	fiftyResponseTime      float64 // 50%请求响应时间
-	ninetyResponseTime     float64 // 90%请求响应时间
-	ninetyFiveResponseTime float64 // 95%请求响应时间
-	ninetyNineResponseTime float64 // 99%请求响应时间
+	duration           float64 // the duration of stats
 }
 
 type dataOutput struct {
-	UserCount            int32                             `json:"user_count"`
+	UserCount            int64                             `json:"user_count"`
 	State                int32                             `json:"state"`
 	TotalStats           *statsEntryOutput                 `json:"stats_total"`
 	TransactionsPassed   int64                             `json:"transactions_passed"`
 	TransactionsFailed   int64                             `json:"transactions_failed"`
 	TotalAvgResponseTime float64                           `json:"total_avg_response_time"`
+	TotalMinResponseTime float64                           `json:"total_min_response_time"`
+	TotalMaxResponseTime float64                           `json:"total_max_response_time"`
 	TotalRPS             float64                           `json:"total_rps"`
 	TotalFailRatio       float64                           `json:"total_fail_ratio"`
+	TotalFailPerSec      float64                           `json:"total_fail_per_sec"`
+	Duration             float64                           `json:"duration"`
 	Stats                []*statsEntryOutput               `json:"stats"`
 	Errors               map[string]map[string]interface{} `json:"errors"`
 }
 
 func convertData(data map[string]interface{}) (output *dataOutput, err error) {
-	userCount, ok := data["user_count"].(int32)
+	userCount, ok := data["user_count"].(int64)
 	if !ok {
 		return nil, fmt.Errorf("user_count is not int32")
 	}
@@ -297,12 +210,16 @@ func convertData(data map[string]interface{}) (output *dataOutput, err error) {
 	output = &dataOutput{
 		UserCount:            userCount,
 		State:                state,
+		Duration:             entryTotalOutput.duration,
 		TotalStats:           entryTotalOutput,
 		TransactionsPassed:   transactionsPassed,
 		TransactionsFailed:   transactionsFailed,
 		TotalAvgResponseTime: entryTotalOutput.avgResponseTime,
+		TotalMaxResponseTime: float64(entryTotalOutput.MaxResponseTime),
+		TotalMinResponseTime: float64(entryTotalOutput.MinResponseTime),
 		TotalRPS:             entryTotalOutput.currentRps,
 		TotalFailRatio:       getTotalFailRatio(entryTotalOutput.NumRequests, entryTotalOutput.NumFailures),
+		TotalFailPerSec:      entryTotalOutput.currentFailPerSec,
 		Stats:                make([]*statsEntryOutput, 0, len(stats)),
 		Errors:               errors,
 	}
@@ -334,44 +251,25 @@ func deserializeStatsEntry(stat interface{}) (entryOutput *statsEntryOutput, err
 
 	var duration float64
 	if entry.Name == "Total" {
-		duration = float64(entry.LastRequestTimestamp - entry.StartTime)
-		// fix: avoid divide by zero
-		if duration < 1 {
-			duration = 1
+		duration = float64(entry.LastRequestTimestamp-entry.StartTime) / 1e3
+		if duration == 0 {
+			return nil, errors.New("no step specified")
 		}
 	} else {
 		duration = float64(reportStatsInterval / time.Second)
 	}
 
 	numRequests := entry.NumRequests
-	if entry.Name == "Total" {
-		duration = float64(entry.LastRequestTimestamp - entry.StartTime)
-		entryOutput = &statsEntryOutput{
-			statsEntry:         entry,
-			medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
-			avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
-			avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
-			currentRps:         getCurrentRps(numRequests, duration),
-			currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration)}
-		return
-	} else {
-		duration = float64(reportStatsInterval / time.Second)
-		entryOutput = &statsEntryOutput{
-			statsEntry:         entry,
-			medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
-			avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
-			avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
-			currentRps:         getCurrentRps(numRequests, duration),
-			currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration),
-			// added by LotteTian
-			fiftyResponseTime:      getFiftyResponseTime(entry.Url2ResponseTimes, entry.Name),      // 50%请求响应时间
-			ninetyResponseTime:     getNinetyResponseTime(entry.Url2ResponseTimes, entry.Name),     // 90%请求响应时间
-			ninetyFiveResponseTime: getNinetyFiveResponseTime(entry.Url2ResponseTimes, entry.Name), // 95%请求响应时间
-			ninetyNineResponseTime: getNinetyNineResponseTime(entry.Url2ResponseTimes, entry.Name), // 99%请求响应时间
-			//maxResponseTime:        getMaxResponseTime(entry.ResponseTimes),        // 最大请求响应时间
-		}
-		return
+	entryOutput = &statsEntryOutput{
+		statsEntry:         entry,
+		duration:           duration,
+		medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
+		avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
+		avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
+		currentRps:         getCurrentRps(numRequests, duration),
+		currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration),
 	}
+	return
 }
 
 // gauge vectors for requests
@@ -450,6 +348,20 @@ var (
 		},
 		[]string{"method", "name", "error"},
 	)
+	counterTotalNumRequests = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "total_num_requests",
+			Help: "The number of requests in total",
+		},
+		[]string{"method", "name"},
+	)
+	counterTotalNumFailures = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "total_num_failures",
+			Help: "The number of failures in total",
+		},
+		[]string{"method", "name"},
+	)
 )
 
 // summary for total
@@ -459,9 +371,9 @@ var (
 			Name: "response_time",
 			Help: "The summary of response time",
 			Objectives: map[float64]float64{
-				0.5:  0.01,
-				0.9:  0.01,
-				0.95: 0.005,
+				0.5:  0.01,  // PCT50
+				0.9:  0.01,  // PCT90
+				0.95: 0.005, // PCT95
 			},
 			AgeBuckets: 1,
 			MaxAge:     100000 * time.Second,
@@ -481,7 +393,13 @@ var (
 	gaugeState = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "state",
-			Help: "The current runner state, 1=initializing, 2=spawning, 3=running, 4=quitting, 5=stopped",
+			Help: "The current runner state, 1=initializing, 2=spawning, 3=running, 4=stopping, 5=stopped, 6=quitting, 7=missing",
+		},
+	)
+	gaugeDuration = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "duration",
+			Help: "The duration of load testing",
 		},
 	)
 	gaugeTotalAverageResponseTime = prometheus.NewGauge(
@@ -489,6 +407,20 @@ var (
 			Name: "total_average_response_time",
 			Help: "The average response time in total milliseconds",
 		},
+	)
+	gaugeTotalMinResponseTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "total_min_response_time",
+			Help: "The min response time in total milliseconds",
+		},
+		[]string{"method", "name"},
+	)
+	gaugeTotalMaxResponseTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "total_max_response_time",
+			Help: "The max response time in total milliseconds",
+		},
+		[]string{"method", "name"},
 	)
 	gaugeTotalRPS = prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -500,6 +432,12 @@ var (
 		prometheus.GaugeOpts{
 			Name: "fail_ratio",
 			Help: "The ratio of request failures in total",
+		},
+	)
+	gaugeTotalFailPerSec = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "total_fail_per_sec",
+			Help: "The failure number per second in total",
 		},
 	)
 	gaugeTransactionsPassed = prometheus.NewGauge(
@@ -516,21 +454,30 @@ var (
 	)
 )
 
+var (
+	minResponseTimeMap = sync.Map{}
+	maxResponseTimeMap = sync.Map{}
+)
+
 // NewPrometheusPusherOutput returns a PrometheusPusherOutput.
-func NewPrometheusPusherOutput(gatewayURL, jobName string) *PrometheusPusherOutput {
+func NewPrometheusPusherOutput(gatewayURL, jobName string, mode string) *PrometheusPusherOutput {
 	nodeUUID, _ := uuid.NewUUID()
 	return &PrometheusPusherOutput{
-		Pusher: push.New(gatewayURL, jobName).Grouping("instance", nodeUUID.String()),
+		pusher: push.New(gatewayURL, jobName).
+			Grouping("instance", nodeUUID.String()).
+			Grouping("mode", mode),
 	}
 }
 
 // PrometheusPusherOutput pushes boomer stats to Prometheus Pushgateway.
 type PrometheusPusherOutput struct {
-	Pusher *push.Pusher // Prometheus Pushgateway Pusher
+	pusher *push.Pusher // Prometheus Pushgateway Pusher
 }
 
 // OnStart will register all prometheus metric collectors
 func (o *PrometheusPusherOutput) OnStart() {
+	// reset all prometheus metrics
+	resetPrometheusMetrics()
 	log.Info().Msg("register prometheus metric collectors")
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(
@@ -546,25 +493,31 @@ func (o *PrometheusPusherOutput) OnStart() {
 		gaugeCurrentFailPerSec,
 		// counter for total
 		counterErrors,
+		counterTotalNumRequests,
+		counterTotalNumFailures,
 		// summary for total
 		summaryResponseTime,
 		// gauges for total
 		gaugeUsers,
 		gaugeState,
+		gaugeDuration,
 		gaugeTotalAverageResponseTime,
+		gaugeTotalMinResponseTime,
+		gaugeTotalMaxResponseTime,
 		gaugeTotalRPS,
 		gaugeTotalFailRatio,
+		gaugeTotalFailPerSec,
 		gaugeTransactionsPassed,
 		gaugeTransactionsFailed,
 	)
-	o.Pusher = o.Pusher.Gatherer(registry)
+	o.pusher = o.pusher.Gatherer(registry)
 }
 
 // OnStop of PrometheusPusherOutput has nothing to do.
 func (o *PrometheusPusherOutput) OnStop() {
 	// update runner state: stopped
-	gaugeState.Set(float64(stateStopped))
-	if err := o.Pusher.Push(); err != nil {
+	gaugeState.Set(float64(StateStopped))
+	if err := o.pusher.Push(); err != nil {
 		log.Error().Err(err).Msg("push to Pushgateway failed")
 	}
 }
@@ -583,14 +536,22 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 	// runner state
 	gaugeState.Set(float64(output.State))
 
-	// avg response time in total
+	// min/avg/max response time in total
 	gaugeTotalAverageResponseTime.Set(output.TotalAvgResponseTime)
+	gaugeTotalMinResponseTime.WithLabelValues("", "Total").Set(output.TotalMinResponseTime)
+	gaugeTotalMaxResponseTime.WithLabelValues("", "Total").Set(output.TotalMaxResponseTime)
+
+	// duration
+	gaugeDuration.Set(output.Duration)
 
 	// rps in total
 	gaugeTotalRPS.Set(output.TotalRPS)
 
 	// failure ratio in total
 	gaugeTotalFailRatio.Set(output.TotalFailRatio)
+
+	// failure per second in total
+	gaugeTotalFailPerSec.Set(output.TotalFailPerSec)
 
 	// accumulated number of transactions
 	gaugeTransactionsPassed.Set(float64(output.TransactionsPassed))
@@ -599,6 +560,7 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 	for _, stat := range output.Stats {
 		method := stat.Method
 		name := stat.Name
+		// stats in stats interval
 		gaugeNumRequests.WithLabelValues(method, name).Set(float64(stat.NumRequests))
 		gaugeNumFailures.WithLabelValues(method, name).Set(float64(stat.NumFailures))
 		gaugeMedianResponseTime.WithLabelValues(method, name).Set(float64(stat.medianResponseTime))
@@ -614,6 +576,24 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 				summaryResponseTime.WithLabelValues(method, name).Observe(float64(responseTime))
 			}
 		}
+		// every stat in total
+		key := fmt.Sprintf("%v_%v", method, name)
+		minResponseTime, loaded := minResponseTimeMap.LoadOrStore(key, float64(stat.MinResponseTime))
+		if loaded {
+			minResponseTime = math.Min(minResponseTime.(float64), float64(stat.MinResponseTime))
+			minResponseTimeMap.Store(key, minResponseTime)
+		}
+		gaugeTotalMinResponseTime.WithLabelValues(method, name).Set(minResponseTime.(float64))
+
+		maxResponseTime, loaded := maxResponseTimeMap.LoadOrStore(key, float64(stat.MaxResponseTime))
+		if loaded {
+			maxResponseTime = math.Max(maxResponseTime.(float64), float64(stat.MaxResponseTime))
+			maxResponseTimeMap.Store(key, maxResponseTime)
+		}
+		gaugeTotalMaxResponseTime.WithLabelValues(method, name).Set(maxResponseTime.(float64))
+
+		counterTotalNumRequests.WithLabelValues(method, name).Add(float64(stat.NumRequests))
+		counterTotalNumFailures.WithLabelValues(method, name).Add(float64(stat.NumFailures))
 	}
 
 	// errors
@@ -625,7 +605,42 @@ func (o *PrometheusPusherOutput) OnEvent(data map[string]interface{}) {
 		).Add(float64(requestError["occurrences"].(int64)))
 	}
 
-	if err := o.Pusher.Push(); err != nil {
+	if err := o.pusher.Push(); err != nil {
 		log.Error().Err(err).Msg("push to Pushgateway failed")
 	}
+}
+
+// resetPrometheusMetrics will reset all metrics
+func resetPrometheusMetrics() {
+	log.Info().Msg("reset all prometheus metrics")
+	gaugeNumRequests.Reset()
+	gaugeNumFailures.Reset()
+	gaugeMedianResponseTime.Reset()
+	gaugeAverageResponseTime.Reset()
+	gaugeMinResponseTime.Reset()
+	gaugeMaxResponseTime.Reset()
+	gaugeAverageContentLength.Reset()
+	gaugeCurrentRPS.Reset()
+	gaugeCurrentFailPerSec.Reset()
+	// counter for total
+	counterErrors.Reset()
+	counterTotalNumRequests.Reset()
+	counterTotalNumFailures.Reset()
+	// summary for total
+	summaryResponseTime.Reset()
+	// gauges for total
+	gaugeUsers.Set(0)
+	gaugeState.Set(1)
+	gaugeDuration.Set(0)
+	gaugeTotalAverageResponseTime.Set(0)
+	gaugeTotalMinResponseTime.Reset()
+	gaugeTotalMaxResponseTime.Reset()
+	gaugeTotalRPS.Set(0)
+	gaugeTotalFailRatio.Set(0)
+	gaugeTotalFailPerSec.Set(0)
+	gaugeTransactionsPassed.Set(0)
+	gaugeTransactionsFailed.Set(0)
+
+	minResponseTimeMap = sync.Map{}
+	maxResponseTimeMap = sync.Map{}
 }

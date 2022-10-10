@@ -11,11 +11,6 @@ func RunPytest(args []string) error {
 		Action:   "hrp pytest",
 	})
 
-	python3, err := builtin.EnsurePython3Venv("httprunner")
-	if err != nil {
-		return err
-	}
-
-	args = append([]string{"-m", "httprunner", "run"}, args...)
-	return builtin.ExecCommand(python3, args...)
+	args = append([]string{"run"}, args...)
+	return builtin.ExecPython3Command("httprunner", args...)
 }

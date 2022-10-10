@@ -33,7 +33,7 @@ Website: https://httprunner.com
 Github: https://github.com/httprunner/httprunner
 Copyright 2017 debugtalk`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		var noColor = false
+		noColor := false
 		if runtime.GOOS == "windows" {
 			noColor = true
 		}
@@ -42,12 +42,14 @@ Copyright 2017 debugtalk`,
 			log.Info().Msg("Set log to color console other than JSON format.")
 		}
 	},
-	Version: version.VERSION,
+	Version:          version.VERSION,
+	TraverseChildren: true,
 }
 
 var (
 	logLevel string
 	logJSON  bool
+	venv     string
 )
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -55,6 +57,7 @@ var (
 func Execute() {
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "INFO", "set log level")
 	rootCmd.PersistentFlags().BoolVar(&logJSON, "log-json", false, "set log to json format")
+	rootCmd.PersistentFlags().StringVar(&venv, "venv", "", "specify python3 venv path")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

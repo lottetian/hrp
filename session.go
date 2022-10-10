@@ -1,10 +1,7 @@
 package hrp
 
 import (
-	"crypto/tls"
 	_ "embed"
-	"golang.org/x/net/http2"
-	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -20,11 +17,11 @@ type SessionRunner struct {
 	// transactions stores transaction timing info.
 	// key is transaction name, value is map of transaction type and time, e.g. start time and end time.
 	transactions      map[string]map[transactionType]time.Time
-	startTime         time.Time               // record start time of the testcase
-	summary           *TestCaseSummary        // record test case summary
-	wsConn            *websocket.Conn         // one websocket connection each session
-	pongResponseChan  chan string             // channel used to receive pong response message
-	closeResponseChan chan *wsCloseRespObject // channel used to receive close response message
+	startTime         time.Time                  // record start time of the testcase
+	summary           *TestCaseSummary           // record test case summary
+	wsConnMap         map[string]*websocket.Conn // save all websocket connections
+	pongResponseChan  chan string                // channel used to receive pong response message
+	closeResponseChan chan *wsCloseRespObject    // channel used to receive close response message
 }
 
 func (r *SessionRunner) resetSession() {
@@ -33,24 +30,9 @@ func (r *SessionRunner) resetSession() {
 	r.transactions = make(map[string]map[transactionType]time.Time)
 	r.startTime = time.Now()
 	r.summary = newSummary()
+	r.wsConnMap = make(map[string]*websocket.Conn)
 	r.pongResponseChan = make(chan string, 1)
 	r.closeResponseChan = make(chan *wsCloseRespObject, 1)
-}
-
-func (r *SessionRunner) resetHttpClient() {
-	log.Info().Msg("reset step http client")
-	r.hrpRunner.httpClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		Timeout: 30 * time.Second,
-	}
-	r.hrpRunner.http2Client = &http.Client{
-		Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		Timeout: 30 * time.Second,
-	}
 }
 
 func (r *SessionRunner) GetParser() *Parser {
@@ -92,9 +74,6 @@ func (r *SessionRunner) Start(givenVars map[string]interface{}) error {
 		log.Info().Str("step", stepName).
 			Str("type", string(step.Type())).Msg("run step start")
 
-		// reset step http client
-		r.resetHttpClient()
-
 		stepResult, err := step.Run(r)
 		stepResult.Name = stepName
 		if err != nil {
@@ -124,11 +103,13 @@ func (r *SessionRunner) Start(givenVars map[string]interface{}) error {
 
 	// close websocket connection after all steps done
 	defer func() {
-		if r.wsConn != nil {
-			log.Info().Str("testcase", config.Name).Msg("websocket disconnected")
-			err := r.wsConn.Close()
-			if err != nil {
-				log.Error().Err(err).Msg("websocket disconnection failed")
+		for _, wsConn := range r.wsConnMap {
+			if wsConn != nil {
+				log.Info().Str("testcase", config.Name).Msg("websocket disconnected")
+				err := wsConn.Close()
+				if err != nil {
+					log.Error().Err(err).Msg("websocket disconnection failed")
+				}
 			}
 		}
 	}()

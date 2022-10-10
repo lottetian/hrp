@@ -3,17 +3,15 @@ package hrp
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
+	"sync"
 
 	"github.com/httprunner/funplugin"
 	"github.com/httprunner/funplugin/fungo"
-	"github.com/rs/zerolog/log"
-
 	"github.com/lottetian/hrp/internal/builtin"
 	"github.com/lottetian/hrp/internal/sdk"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -27,7 +25,7 @@ const (
 
 const projectInfoFile = "proj.json" // used for ensuring root project
 
-var pluginMap = map[string]funplugin.IPlugin{} // used for reusing plugin instance
+var pluginMap = sync.Map{} // used for reusing plugin instance
 
 func initPlugin(path, venv string, logOn bool) (plugin funplugin.IPlugin, err error) {
 	// plugin file not found
@@ -40,8 +38,8 @@ func initPlugin(path, venv string, logOn bool) (plugin funplugin.IPlugin, err er
 	}
 
 	// reuse plugin instance if it already initialized
-	if p, ok := pluginMap[pluginPath]; ok {
-		return p, nil
+	if p, ok := pluginMap.Load(pluginPath); ok {
+		return p.(funplugin.IPlugin), nil
 	}
 
 	pluginOptions := []funplugin.Option{funplugin.WithLogOn(logOn)}
@@ -77,15 +75,7 @@ func initPlugin(path, venv string, logOn bool) (plugin funplugin.IPlugin, err er
 	}
 
 	// add plugin instance to plugin map
-	pluginMap[pluginPath] = plugin
-
-	// catch Interrupt and SIGTERM signals to ensure plugin quitted
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		plugin.Quit()
-	}()
+	pluginMap.Store(pluginPath, plugin)
 
 	// report event for initializing plugin
 	event := sdk.EventTracking{
@@ -153,7 +143,7 @@ func locateFile(startPath string, destFile string) (string, error) {
 	return locateFile(parentDir, destFile)
 }
 
-func getProjectRootDirPath(path string) (rootDir string, err error) {
+func GetProjectRootDirPath(path string) (rootDir string, err error) {
 	pluginPath, err := locatePlugin(path)
 	if err == nil {
 		rootDir = filepath.Dir(pluginPath)

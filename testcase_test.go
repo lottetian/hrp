@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	templatesDir   = "./internal/scaffold/templates/"
-	hrpExamplesDir = "./examples/hrp"
+	hrpExamplesDir = "../examples/hrp"
 )
 
 // tmpl returns template file path

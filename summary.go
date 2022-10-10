@@ -10,9 +10,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/lottetian/hrp/internal/builtin"
 	"github.com/lottetian/hrp/internal/version"
-	"github.com/rs/zerolog/log"
 )
 
 func newOutSummary() *Summary {

@@ -1,6 +1,7 @@
 package boomer
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/lottetian/hrp/internal/json"
@@ -73,14 +74,16 @@ func (s *requestStats) logTransaction(name string, success bool, responseTime in
 }
 
 func (s *requestStats) logRequest(method, name string, responseTime int64, contentLength int64) {
-	s.total.log(responseTime, contentLength)
-	s.total.logUrl2Response(responseTime, name)
+	if method != "testcase" {
+		s.total.log(responseTime, contentLength)
+	}
 	s.get(name, method).log(responseTime, contentLength)
-	s.get(name, method).Url2ResponseTimes = s.total.Url2ResponseTimes
 }
 
 func (s *requestStats) logError(method, name, err string) {
-	s.total.logFailures()
+	if method != "testcase" {
+		s.total.logFailures()
+	}
 	s.get(name, method).logFailures()
 
 	// store error in errors map
@@ -103,8 +106,6 @@ func (s *requestStats) get(name string, method string) (entry *statsEntry) {
 		newEntry := &statsEntry{
 			Name:          name,
 			Method:        method,
-			NumReqsPerSec: make(map[int64]int64),
-			NumFailPerSec: make(map[int64]int64),
 			ResponseTimes: make(map[int64]int64),
 		}
 		s.entries[name+method] = newEntry
@@ -130,7 +131,7 @@ func (s *requestStats) serializeStats() []interface{} {
 	entries := make([]interface{}, 0, len(s.entries))
 	for _, v := range s.entries {
 		if !(v.NumRequests == 0 && v.NumFailures == 0) {
-			entries = append(entries, v.getAccumulativeReport())
+			entries = append(entries, v.getStrippedReport())
 		}
 	}
 	return entries
@@ -173,10 +174,6 @@ type statsEntry struct {
 	MinResponseTime int64 `json:"min_response_time"`
 	// Maximum response time
 	MaxResponseTime int64 `json:"max_response_time"`
-	// A {second => request_count} dict that holds the number of requests made per second
-	NumReqsPerSec map[int64]int64 `json:"num_reqs_per_sec"`
-	// A (second => failure_count) dict that hold the number of failures per second
-	NumFailPerSec map[int64]int64 `json:"num_fail_per_sec"`
 	// A {response_time => count} dict that holds the response time distribution of all the requests
 	// The keys (the response time in ms) are rounded to store 1, 2, ... 9, 10, 20. .. 90,
 	// 100, 200 .. 900, 1000, 2000 ... 9000, in order to save memory.
@@ -191,23 +188,22 @@ type statsEntry struct {
 	// Boomer doesn't allow None response time for requests like locust.
 	// num_none_requests is added to keep compatible with locust.
 	NumNoneRequests int64 `json:"num_none_requests"`
-	// add by LotteTian
-	Url2ResponseTimes map[string]map[int64]int64 `json:"url_2_response_times"`
+}
+
+func (s *statsEntry) resetStartTime() {
+	atomic.StoreInt64(&s.StartTime, time.Duration(time.Now().UnixNano()).Milliseconds())
 }
 
 func (s *statsEntry) reset() {
-	s.StartTime = time.Now().Unix()
+	atomic.StoreInt64(&s.StartTime, time.Duration(time.Now().UnixNano()).Milliseconds())
 	s.NumRequests = 0
 	s.NumFailures = 0
 	s.TotalResponseTime = 0
 	s.ResponseTimes = make(map[int64]int64)
 	s.MinResponseTime = 0
 	s.MaxResponseTime = 0
-	s.LastRequestTimestamp = time.Now().Unix()
-	s.NumReqsPerSec = make(map[int64]int64)
-	s.NumFailPerSec = make(map[int64]int64)
+	s.LastRequestTimestamp = time.Duration(time.Now().UnixNano()).Milliseconds()
 	s.TotalContentLength = 0
-	s.Url2ResponseTimes = make(map[string]map[int64]int64)
 }
 
 func (s *statsEntry) log(responseTime int64, contentLength int64) {
@@ -219,38 +215,8 @@ func (s *statsEntry) log(responseTime int64, contentLength int64) {
 	s.TotalContentLength += contentLength
 }
 
-func (s *statsEntry) logUrl2Response(responseTime int64, name string) {
-	var roundedResponseTime int64
-
-	if responseTime < 100 {
-		roundedResponseTime = responseTime
-	} else if responseTime < 1000 {
-		roundedResponseTime = int64(round(float64(responseTime), .5, -1))
-	} else if responseTime < 10000 {
-		roundedResponseTime = int64(round(float64(responseTime), .5, -2))
-	} else {
-		roundedResponseTime = int64(round(float64(responseTime), .5, -3))
-	}
-
-	_, ok := s.Url2ResponseTimes[name]
-	if !ok {
-		s.Url2ResponseTimes[name] = make(map[int64]int64)
-		s.Url2ResponseTimes[name][roundedResponseTime] = 1
-	} else {
-		s.Url2ResponseTimes[name][roundedResponseTime]++
-	}
-}
-
 func (s *statsEntry) logTimeOfRequest() {
-	key := time.Now().Unix()
-	_, ok := s.NumReqsPerSec[key]
-	if !ok {
-		s.NumReqsPerSec[key] = 1
-	} else {
-		s.NumReqsPerSec[key]++
-	}
-
-	s.LastRequestTimestamp = key
+	s.LastRequestTimestamp = time.Duration(time.Now().UnixNano()).Milliseconds()
 }
 
 func (s *statsEntry) logResponseTime(responseTime int64) {
@@ -294,13 +260,6 @@ func (s *statsEntry) logResponseTime(responseTime int64) {
 
 func (s *statsEntry) logFailures() {
 	s.NumFailures++
-	key := time.Now().Unix()
-	_, ok := s.NumFailPerSec[key]
-	if !ok {
-		s.NumFailPerSec[key] = 1
-	} else {
-		s.NumFailPerSec[key]++
-	}
 }
 
 func (s *statsEntry) serialize() map[string]interface{} {
@@ -319,13 +278,6 @@ func (s *statsEntry) serialize() map[string]interface{} {
 func (s *statsEntry) getStrippedReport() map[string]interface{} {
 	report := s.serialize()
 	s.reset()
-	return report
-}
-
-// added by lotteTian
-func (s *statsEntry) getAccumulativeReport() map[string]interface{} {
-	report := s.serialize()
-	//s.reset()
 	return report
 }
 

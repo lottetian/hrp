@@ -10,11 +10,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/httprunner/funplugin"
+	"github.com/httprunner/funplugin/shared"
 	"github.com/maja42/goval"
 	"github.com/rs/zerolog/log"
 
-	"github.com/httprunner/funplugin"
-	"github.com/httprunner/funplugin/shared"
 	"github.com/lottetian/hrp/internal/builtin"
 )
 

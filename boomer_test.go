@@ -1,17 +1,13 @@
 package hrp
 
 import (
-	"github.com/rs/zerolog"
 	"testing"
+	"time"
 )
 
-func init() {
-	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
-}
-
 func TestBoomerStandaloneRun(t *testing.T) {
-	//buildHashicorpGoPlugin()
-	//defer removeHashicorpGoPlugin()
+	buildHashicorpGoPlugin()
+	defer removeHashicorpGoPlugin()
 
 	testcase1 := &TestCase{
 		Config: NewConfig("TestCase1").SetBaseURL("http://httpbin.org"),
@@ -31,13 +27,8 @@ func TestBoomerStandaloneRun(t *testing.T) {
 	}
 	testcase2 := TestCasePath(demoTestCaseWithPluginJSONPath)
 
-	b := NewBoomer(1000, 200)
-	b.AddOutput(b.NewConsoleOutput())
-	b.Run(testcase1, &testcase2)
-	//err2 := Run(testcase1, testcase2)
-	//if err2 != nil {
-	//	t.Logf("testcase is failed: %s", err2)
-	//}
-	//time.Sleep(5 * time.Second)
-	//b.Quit()
+	b := NewStandaloneBoomer(2, 1)
+	go b.Run(testcase1, &testcase2)
+	time.Sleep(5 * time.Second)
+	b.Quit()
 }

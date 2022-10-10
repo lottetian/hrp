@@ -3,8 +3,9 @@ package hrp
 import (
 	"time"
 
-	"github.com/lottetian/hrp/internal/builtin"
 	"github.com/rs/zerolog/log"
+
+	"github.com/lottetian/hrp/internal/builtin"
 )
 
 type ThinkTime struct {

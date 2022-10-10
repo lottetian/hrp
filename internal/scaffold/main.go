@@ -12,10 +12,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
-	"github.com/httprunner/httprunner/v4/hrp"
-	"github.com/httprunner/httprunner/v4/hrp/internal/builtin"
-	"github.com/httprunner/httprunner/v4/hrp/internal/sdk"
-	"github.com/httprunner/httprunner/v4/hrp/internal/version"
+	"github.com/lottetian/hrp"
+	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/sdk"
+	"github.com/lottetian/hrp/internal/version"
 )
 
 type PluginType string

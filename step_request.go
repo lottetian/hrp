@@ -6,7 +6,6 @@ import (
 	"compress/zlib"
 	"crypto/tls"
 	"fmt"
-	"github.com/lottetian/hrp/internal/httpstat"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -23,6 +21,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/lottetian/hrp/internal/builtin"
+	"github.com/lottetian/hrp/internal/httpstat"
 	"github.com/lottetian/hrp/internal/json"
 )
 
@@ -248,7 +247,7 @@ func (r *requestBuilder) prepareBody(stepVariables map[string]interface{}) error
 		dataBytes = vv
 	case bytes.Buffer:
 		dataBytes = vv.Bytes()
-	case *builtin.TFormWriter:
+	case *builtin.TFormDataWriter:
 		dataBytes = vv.Payload.Bytes()
 	default: // unexpected body type
 		return errors.New("unexpected request body type")
@@ -269,7 +268,7 @@ func initUpload(step *TStep) {
 }
 
 func prepareUpload(parser *Parser, step *TStep, stepVariables map[string]interface{}) (err error) {
-	if step.Request.Upload == nil {
+	if len(step.Request.Upload) == 0 {
 		return
 	}
 	uploadMap, err := parser.Parse(step.Request.Upload, stepVariables)
@@ -388,13 +387,22 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	if err != nil {
 		return stepResult, errors.Wrap(err, "do request failed")
 	}
-	defer resp.Body.Close()
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+
+	stepResult.Elapsed = time.Since(start).Milliseconds()
+	if stepResult.Elapsed >= 6000 {
+		log.Error().Str("request time", strconv.FormatInt(stepResult.Elapsed, 10)).
+			Msg("request trace id is : " + step.Request.Headers["Cloud-Trace-Id"])
+	}
 
 	// decode response body in br/gzip/deflate formats
 	err = decodeResponseBody(resp)
 	if err != nil {
 		return stepResult, errors.Wrap(err, "decode response body failed")
 	}
+	defer resp.Body.Close()
 
 	// log & print response
 	if r.LogOn() {
@@ -408,12 +416,6 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	if err != nil {
 		err = errors.Wrap(err, "init ResponseObject error")
 		return
-	}
-
-	stepResult.Elapsed = time.Since(start).Milliseconds()
-	if stepResult.Elapsed >= 6000 {
-		log.Error().Str("request time", step.Name).Msg("request cost: " + strconv.FormatInt(stepResult.Elapsed, 10))
-		log.Error().Str("trace id", step.Request.Headers["Cloud-Trace-Id"]).Msg("request trace id is : " + rb.req.Header.Get("Cloud-Trace-Id"))
 	}
 	if r.HTTPStatOn() {
 		// resp.Body has been ReadAll
@@ -454,62 +456,6 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	stepResult.ContentSize = resp.ContentLength
 	stepResult.Data = sessionData
 
-	return stepResult, err
-}
-
-func runStepRequestWithTimes(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
-	times, atoErr := strconv.Atoi(step.Times)
-	current := step.Current
-	if atoErr != nil {
-		log.Info().Str("step", step.Name).Msg("run step start")
-		return runStepRequest(r, step)
-	}
-	if current {
-		return runStepRequestWithCurrentTimes(r, step)
-	} else {
-		for i := 0; i < times; i++ {
-			log.Info().Str("step", step.Name).Msg("run step start at " + strconv.Itoa(i+1) + " times")
-			stepResult, err := runStepRequest(r, step)
-			if err == nil {
-				return stepResult, nil
-			}
-		}
-	}
-	return stepResult, err
-}
-
-func runStepRequestWithCurrentTimes(r *SessionRunner, step *TStep) (stepResult *StepResult, err error) {
-	times, err := strconv.Atoi(step.Times)
-	if err != nil {
-		log.Info().Str("step", step.Name).Msg("run step start")
-		return runStepRequest(r, step)
-	}
-	resultChan := make(chan *StepResult, times)
-	errChan := make(chan error, times)
-	defer func() {
-		close(resultChan)
-		close(errChan)
-	}()
-	var wg sync.WaitGroup
-	for i := 0; i < times; i++ {
-		wg.Add(1)
-		go func() {
-			stepResult, err := runStepRequest(r, step)
-			resultChan <- stepResult
-			errChan <- err
-			wg.Done()
-		}()
-	}
-	wg.Wait()
-	select {
-	case outStepResult := <-resultChan:
-		stepResult = outStepResult
-	case outErr := <-errChan:
-		err = outErr
-		if err == nil {
-			return stepResult, err
-		}
-	}
 	return stepResult, err
 }
 
@@ -622,22 +568,6 @@ func (s *StepRequest) WithVariables(variables map[string]interface{}) *StepReque
 func (s *StepRequest) SetupHook(hook string) *StepRequest {
 	s.step.SetupHooks = append(s.step.SetupHooks, hook)
 	return s
-}
-
-// SetTimes sets running times.
-func (s *StepRequest) SetTimes(times string) *StepRequest {
-	s.step.Times = times
-	return &StepRequest{
-		step: s.step,
-	}
-}
-
-// SetCurrent sets current running
-func (s *StepRequest) SetCurrent(current bool) *StepRequest {
-	s.step.Current = current
-	return &StepRequest{
-		step: s.step,
-	}
 }
 
 // HTTP2 enables HTTP/2 protocol
@@ -945,7 +875,7 @@ func (s *StepRequestWithOptionalArgs) Struct() *TStep {
 }
 
 func (s *StepRequestWithOptionalArgs) Run(r *SessionRunner) (*StepResult, error) {
-	return runStepRequestWithTimes(r, s.step)
+	return runStepRequest(r, s.step)
 }
 
 // StepRequestExtraction implements IStep interface.
@@ -986,7 +916,7 @@ func (s *StepRequestExtraction) Struct() *TStep {
 
 func (s *StepRequestExtraction) Run(r *SessionRunner) (*StepResult, error) {
 	if s.step.Request != nil {
-		return runStepRequestWithTimes(r, s.step)
+		return runStepRequest(r, s.step)
 	}
 	if s.step.WebSocket != nil {
 		return runStepWebSocket(r, s.step)
@@ -1022,7 +952,7 @@ func (s *StepRequestValidation) Struct() *TStep {
 
 func (s *StepRequestValidation) Run(r *SessionRunner) (*StepResult, error) {
 	if s.step.Request != nil {
-		return runStepRequestWithTimes(r, s.step)
+		return runStepRequest(r, s.step)
 	}
 	if s.step.WebSocket != nil {
 		return runStepWebSocket(r, s.step)

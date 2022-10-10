@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 package boomer
@@ -23,6 +24,7 @@ func SetUlimit(limit uint64) {
 	}
 
 	rLimit.Cur = limit
+	rLimit.Max = limit
 	log.Info().Uint64("limit", rLimit.Cur).Msg("set current ulimit")
 	err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {

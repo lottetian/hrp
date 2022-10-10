@@ -26,21 +26,7 @@ var runCmd = &cobra.Command{
 			path := hrp.TestCasePath(arg)
 			paths = append(paths, &path)
 		}
-		runner := hrp.NewRunner(nil).
-			SetFailfast(!continueOnFailure).
-			SetSaveTests(saveTests)
-		if genHTMLReport {
-			runner.GenHTMLReport()
-		}
-		if !requestsLogOff {
-			runner.SetRequestsLogOn()
-		}
-		if pluginLogOn {
-			runner.SetPluginLogOn()
-		}
-		if proxyUrl != "" {
-			runner.SetProxyUrl(proxyUrl)
-		}
+		runner := makeHRPRunner()
 		err := runner.Run(paths...)
 		if err != nil {
 			os.Exit(1)
@@ -51,6 +37,7 @@ var runCmd = &cobra.Command{
 var (
 	continueOnFailure bool
 	requestsLogOff    bool
+	httpStatOn        bool
 	pluginLogOn       bool
 	proxyUrl          string
 	saveTests         bool
@@ -61,8 +48,34 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolVarP(&continueOnFailure, "continue-on-failure", "c", false, "continue running next step when failure occurs")
 	runCmd.Flags().BoolVar(&requestsLogOff, "log-requests-off", false, "turn off request & response details logging")
+	runCmd.Flags().BoolVar(&httpStatOn, "http-stat", false, "turn on HTTP latency stat (DNSLookup, TCP Connection, etc.)")
 	runCmd.Flags().BoolVar(&pluginLogOn, "log-plugin", false, "turn on plugin logging")
 	runCmd.Flags().StringVarP(&proxyUrl, "proxy-url", "p", "", "set proxy url")
 	runCmd.Flags().BoolVarP(&saveTests, "save-tests", "s", false, "save tests summary")
 	runCmd.Flags().BoolVarP(&genHTMLReport, "gen-html-report", "g", false, "generate html report")
+}
+
+func makeHRPRunner() *hrp.HRPRunner {
+	runner := hrp.NewRunner(nil).
+		SetFailfast(!continueOnFailure).
+		SetSaveTests(saveTests)
+	if genHTMLReport {
+		runner.GenHTMLReport()
+	}
+	if !requestsLogOff {
+		runner.SetRequestsLogOn()
+	}
+	if httpStatOn {
+		runner.SetHTTPStatOn()
+	}
+	if pluginLogOn {
+		runner.SetPluginLogOn()
+	}
+	if venv != "" {
+		runner.SetPython3Venv(venv)
+	}
+	if proxyUrl != "" {
+		runner.SetProxyUrl(proxyUrl)
+	}
+	return runner
 }
