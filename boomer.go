@@ -49,6 +49,10 @@ func NewWorkerBoomer(masterHost string, masterPort int) *HRPBoomer {
 	return b
 }
 
+func (b *HRPBoomer) NewConsoleOutput() *boomer.ConsoleOutput {
+	return &boomer.ConsoleOutput{}
+}
+
 type HRPBoomer struct {
 	*boomer.Boomer
 	hrpRunner    *HRPRunner
