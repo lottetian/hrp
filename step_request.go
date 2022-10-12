@@ -49,7 +49,8 @@ type Request struct {
 	Body           interface{}            `json:"body,omitempty" yaml:"body,omitempty"`
 	Json           interface{}            `json:"json,omitempty" yaml:"json,omitempty"`
 	Data           interface{}            `json:"data,omitempty" yaml:"data,omitempty"`
-	Timeout        float64                `json:"timeout,omitempty" yaml:"timeout,omitempty"` // timeout in seconds
+	Timeout        float64                `json:"timeout,omitempty" yaml:"timeout,omitempty"`       // timeout in seconds
+	UnsafeTime     int64                  `json:"unsafeTime,omitempty" yaml:"unsafeTime,omitempty"` // 压测超时时间
 	AllowRedirects bool                   `json:"allow_redirects,omitempty" yaml:"allow_redirects,omitempty"`
 	Verify         bool                   `json:"verify,omitempty" yaml:"verify,omitempty"`
 	Upload         map[string]interface{} `json:"upload,omitempty" yaml:"upload,omitempty"`
@@ -392,11 +393,17 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	}
 
 	stepResult.Elapsed = time.Since(start).Milliseconds()
-	if stepResult.Elapsed >= 6000 {
+	var unsafeTime int64
+	if step.Request.UnsafeTime != 0 {
+		unsafeTime = int64(time.Duration(step.Request.UnsafeTime*1000) * time.Millisecond)
+	} else {
+		unsafeTime = 6000
+	}
+	if stepResult.Elapsed >= unsafeTime {
 		log.Error().Str("request time", strconv.FormatInt(stepResult.Elapsed, 10)+"ms").
 			Str("start at", start.String()).
 			Str("trace id", rb.req.Header.Get("Cloud-Trace-Id")).
-			Msg("超时请求")
+			Msg("超时请求时间为：" + strconv.FormatInt(unsafeTime, 10) + "ms")
 	}
 
 	// decode response body in br/gzip/deflate formats
