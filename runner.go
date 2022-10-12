@@ -89,6 +89,7 @@ func (r *HRPRunner) SetClientTransport(maxConns int, disableKeepAlive bool, disa
 		MaxIdleConnsPerHost: maxConns,
 		DisableKeepAlives:   disableKeepAlive,
 		DisableCompression:  disableCompression,
+		TLSNextProto:        map[string]func(string, *tls.Conn) http.RoundTripper{},
 	}
 	r.http2Client.Transport = &http2.Transport{
 		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
