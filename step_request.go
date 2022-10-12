@@ -395,7 +395,8 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	if stepResult.Elapsed >= 6000 {
 		log.Error().Str("request time", strconv.FormatInt(stepResult.Elapsed, 10)+"ms").
 			Str("start at", start.String()).
-			Str("trace id", rb.req.Header.Get("Cloud-Trace-Id"))
+			Str("trace id", rb.req.Header.Get("Cloud-Trace-Id")).
+			Msg("超时请求")
 	}
 
 	// decode response body in br/gzip/deflate formats
