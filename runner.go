@@ -82,14 +82,14 @@ func (r *HRPRunner) SetClientTransport(maxConns int, disableKeepAlive bool, disa
 	r.httpClient.Transport = &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		DialContext: (&net.Dialer{
-			Timeout:   20 * time.Second, // 连接超时时间
+			Timeout:   60 * time.Second, // 连接超时时间
 			KeepAlive: 60 * time.Second, // 保持长连接的时间
 		}).DialContext,
 		MaxIdleConns:        1000,
 		MaxIdleConnsPerHost: maxConns,
 		DisableKeepAlives:   disableKeepAlive,
 		DisableCompression:  disableCompression,
-		TLSNextProto:        map[string]func(string, *tls.Conn) http.RoundTripper{},
+		TLSNextProto:        make(map[string]func(string, *tls.Conn) http.RoundTripper),
 	}
 	r.http2Client.Transport = &http2.Transport{
 		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},

@@ -217,6 +217,7 @@ func (v *responseObject) Validate(iValidators []interface{}, variablesMapping ma
 				Str("checkValueType", builtin.InterfaceType(checkValue)).
 				Interface("expectValue", expectValue).
 				Str("expectValueType", builtin.InterfaceType(expectValue)).
+				Str("RequestId", v.respObjMeta.(httpRespObjMeta).Headers["Request-Id"]).
 				Msg("assert failed")
 			return errors.New("step validation failed")
 		}
