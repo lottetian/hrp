@@ -1,6 +1,7 @@
 package boomer
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -349,6 +350,24 @@ func (r *runner) reportTestResult() {
 	}
 	duration := time.Duration(entryTotalOutput.LastRequestTimestamp-entryTotalOutput.StartTime) * time.Millisecond
 	currentTime := time.Now()
+	report := map[string]interface{}{
+		"header": fmt.Sprintf("Current time: %s, Users: %v, Duration: %v, Accumulated Transactions: %d Passed, %d Failed",
+			currentTime.Format("2006/01/02 15:04:05"), r.controller.getSpawnCount(), duration, r.stats.transactionPassed, r.stats.transactionFailed),
+		"Name":         entryTotalOutput.Name,
+		"requests":     strconv.FormatInt(entryTotalOutput.NumRequests, 10),
+		"fails":        strconv.FormatInt(entryTotalOutput.NumFailures, 10),
+		"Median":       strconv.FormatInt(entryTotalOutput.medianResponseTime, 10),
+		"Average":      strconv.FormatFloat(entryTotalOutput.avgResponseTime, 'f', 2, 64),
+		"Min":          strconv.FormatInt(entryTotalOutput.MinResponseTime, 10),
+		"Max":          strconv.FormatInt(entryTotalOutput.MaxResponseTime, 10),
+		"Content Size": strconv.FormatInt(entryTotalOutput.avgContentLength, 10),
+		"reqs/sec":     strconv.FormatFloat(entryTotalOutput.currentRps, 'f', 2, 64),
+		"fails/sec":    strconv.FormatFloat(entryTotalOutput.currentFailPerSec, 'f', 2, 64),
+	}
+	f, _ := os.Create("./report.json")
+	defer f.Close()
+	write, _ := json.Marshal(report)
+	f.Write(write)
 	println(fmt.Sprint("=========================================== Statistics Summary =========================================="))
 	println(fmt.Sprintf("Current time: %s, Users: %v, Duration: %v, Accumulated Transactions: %d Passed, %d Failed",
 		currentTime.Format("2006/01/02 15:04:05"), r.controller.getCurrentClientsNum(), duration, r.stats.transactionPassed, r.stats.transactionFailed))
