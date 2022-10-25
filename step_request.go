@@ -461,6 +461,10 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	if err == nil {
 		sessionData.Success = true
 		stepResult.Success = true
+	} else {
+		log.Error().
+			Str("trace id", rb.req.Header.Get("Cloud-Trace-Id")).
+			Msg(err.Error())
 	}
 	stepResult.ContentSize = resp.ContentLength
 	stepResult.Data = sessionData
