@@ -357,6 +357,8 @@ func (r *runner) reportTestResult() {
 		"requests":     strconv.FormatInt(entryTotalOutput.NumRequests, 10),
 		"fails":        strconv.FormatInt(entryTotalOutput.NumFailures, 10),
 		"Median":       strconv.FormatInt(entryTotalOutput.medianResponseTime, 10),
+		"95%":          strconv.FormatFloat(entryTotalOutput.ninetyFivePercentageResponseTime, 'f', 2, 64),
+		"99%":          strconv.FormatFloat(entryTotalOutput.ninetyNinePercentageResponseTime, 'f', 2, 64),
 		"Average":      strconv.FormatFloat(entryTotalOutput.avgResponseTime, 'f', 2, 64),
 		"Min":          strconv.FormatInt(entryTotalOutput.MinResponseTime, 10),
 		"Max":          strconv.FormatInt(entryTotalOutput.MaxResponseTime, 10),
@@ -372,18 +374,20 @@ func (r *runner) reportTestResult() {
 	println(fmt.Sprintf("Current time: %s, Users: %v, Duration: %v, Accumulated Transactions: %d Passed, %d Failed",
 		currentTime.Format("2006/01/02 15:04:05"), r.controller.getCurrentClientsNum(), duration, r.stats.transactionPassed, r.stats.transactionFailed))
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Name", "# requests", "# fails", "Median", "Average", "Min", "Max", "Content Size", "# reqs/sec", "# fails/sec"})
-	row := make([]string, 10)
+	table.SetHeader([]string{"Name", "# requests", "# fails", "Median", "Average", "95% response", "99% response", "Min", "Max", "Content Size", "# reqs/sec", "# fails/sec"})
+	row := make([]string, 12)
 	row[0] = entryTotalOutput.Name
 	row[1] = strconv.FormatInt(entryTotalOutput.NumRequests, 10)
 	row[2] = strconv.FormatInt(entryTotalOutput.NumFailures, 10)
 	row[3] = strconv.FormatInt(entryTotalOutput.medianResponseTime, 10)
 	row[4] = strconv.FormatFloat(entryTotalOutput.avgResponseTime, 'f', 2, 64)
-	row[5] = strconv.FormatInt(entryTotalOutput.MinResponseTime, 10)
-	row[6] = strconv.FormatInt(entryTotalOutput.MaxResponseTime, 10)
-	row[7] = strconv.FormatInt(entryTotalOutput.avgContentLength, 10)
-	row[8] = strconv.FormatFloat(entryTotalOutput.currentRps, 'f', 2, 64)
-	row[9] = strconv.FormatFloat(entryTotalOutput.currentFailPerSec, 'f', 2, 64)
+	row[5] = strconv.FormatFloat(entryTotalOutput.ninetyFivePercentageResponseTime, 'f', 2, 64)
+	row[6] = strconv.FormatFloat(entryTotalOutput.ninetyNinePercentageResponseTime, 'f', 2, 64)
+	row[7] = strconv.FormatInt(entryTotalOutput.MinResponseTime, 10)
+	row[8] = strconv.FormatInt(entryTotalOutput.MaxResponseTime, 10)
+	row[9] = strconv.FormatInt(entryTotalOutput.avgContentLength, 10)
+	row[10] = strconv.FormatFloat(entryTotalOutput.currentRps, 'f', 2, 64)
+	row[11] = strconv.FormatFloat(entryTotalOutput.currentFailPerSec, 'f', 2, 64)
 	table.Append(row)
 	table.Render()
 	println()

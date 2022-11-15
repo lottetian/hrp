@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/lottetian/hrp/internal/json"
+	"gonum.org/v1/gonum/stat"
 )
 
 // Output is primarily responsible for printing test results to different destinations
@@ -44,6 +45,38 @@ type ConsoleOutput struct{}
 // NewConsoleOutput returns a ConsoleOutput.
 func NewConsoleOutput() *ConsoleOutput {
 	return &ConsoleOutput{}
+}
+
+// get95PercentResponseTime 95%响应时间统计
+func get95PercentResponseTime(responseTimes map[int64]int64) float64 {
+	ninetyFivePercentageResponseTime := float64(0)
+	if len(responseTimes) != 0 {
+		var sortedKeys []float64
+		for k := range responseTimes {
+			sortedKeys = append(sortedKeys, float64(k))
+		}
+		sort.Slice(sortedKeys, func(i, j int) bool {
+			return sortedKeys[i] < sortedKeys[j]
+		})
+		ninetyFivePercentageResponseTime = stat.Quantile(0.95, stat.Empirical, sortedKeys, nil)
+	}
+	return ninetyFivePercentageResponseTime
+}
+
+// get99PercentResponseTime 99%响应时间统计
+func get99PercentResponseTime(responseTimes map[int64]int64) float64 {
+	ninetyNinePercentageResponseTime := float64(0)
+	if len(responseTimes) != 0 {
+		var sortedKeys []float64
+		for k := range responseTimes {
+			sortedKeys = append(sortedKeys, float64(k))
+		}
+		sort.Slice(sortedKeys, func(i, j int) bool {
+			return sortedKeys[i] < sortedKeys[j]
+		})
+		ninetyNinePercentageResponseTime = stat.Quantile(0.99, stat.Empirical, sortedKeys, nil)
+	}
+	return ninetyNinePercentageResponseTime
 }
 
 func getMedianResponseTime(numRequests int64, responseTimes map[int64]int64) int64 {
@@ -149,29 +182,33 @@ func (o *ConsoleOutput) OnEvent(data map[string]interface{}) {
 type statsEntryOutput struct {
 	statsEntry
 
-	medianResponseTime int64   // median response time
-	avgResponseTime    float64 // average response time, round float to 2 decimal places
-	avgContentLength   int64   // average content size
-	currentRps         float64 // # reqs/sec
-	currentFailPerSec  float64 // # fails/sec
-	duration           float64 // the duration of stats
+	medianResponseTime               int64   // median response time
+	ninetyNinePercentageResponseTime float64 // 99% response time
+	ninetyFivePercentageResponseTime float64 // 95% response time
+	avgResponseTime                  float64 // average response time, round float to 2 decimal places
+	avgContentLength                 int64   // average content size
+	currentRps                       float64 // # reqs/sec
+	currentFailPerSec                float64 // # fails/sec
+	duration                         float64 // the duration of stats
 }
 
 type dataOutput struct {
-	UserCount            int64                             `json:"user_count"`
-	State                int32                             `json:"state"`
-	TotalStats           *statsEntryOutput                 `json:"stats_total"`
-	TransactionsPassed   int64                             `json:"transactions_passed"`
-	TransactionsFailed   int64                             `json:"transactions_failed"`
-	TotalAvgResponseTime float64                           `json:"total_avg_response_time"`
-	TotalMinResponseTime float64                           `json:"total_min_response_time"`
-	TotalMaxResponseTime float64                           `json:"total_max_response_time"`
-	TotalRPS             float64                           `json:"total_rps"`
-	TotalFailRatio       float64                           `json:"total_fail_ratio"`
-	TotalFailPerSec      float64                           `json:"total_fail_per_sec"`
-	Duration             float64                           `json:"duration"`
-	Stats                []*statsEntryOutput               `json:"stats"`
-	Errors               map[string]map[string]interface{} `json:"errors"`
+	UserCount                  int64                             `json:"user_count"`
+	State                      int32                             `json:"state"`
+	TotalStats                 *statsEntryOutput                 `json:"stats_total"`
+	TransactionsPassed         int64                             `json:"transactions_passed"`
+	TransactionsFailed         int64                             `json:"transactions_failed"`
+	TotalAvgResponseTime       float64                           `json:"total_avg_response_time"`
+	Total95PercentResponseTime float64                           `json:"total_95_percent_response_time"`
+	Total99PercentResponseTime float64                           `json:"total_99_percent_response_time"`
+	TotalMinResponseTime       float64                           `json:"total_min_response_time"`
+	TotalMaxResponseTime       float64                           `json:"total_max_response_time"`
+	TotalRPS                   float64                           `json:"total_rps"`
+	TotalFailRatio             float64                           `json:"total_fail_ratio"`
+	TotalFailPerSec            float64                           `json:"total_fail_per_sec"`
+	Duration                   float64                           `json:"duration"`
+	Stats                      []*statsEntryOutput               `json:"stats"`
+	Errors                     map[string]map[string]interface{} `json:"errors"`
 }
 
 func convertData(data map[string]interface{}) (output *dataOutput, err error) {
@@ -208,20 +245,22 @@ func convertData(data map[string]interface{}) (output *dataOutput, err error) {
 	}
 
 	output = &dataOutput{
-		UserCount:            userCount,
-		State:                state,
-		Duration:             entryTotalOutput.duration,
-		TotalStats:           entryTotalOutput,
-		TransactionsPassed:   transactionsPassed,
-		TransactionsFailed:   transactionsFailed,
-		TotalAvgResponseTime: entryTotalOutput.avgResponseTime,
-		TotalMaxResponseTime: float64(entryTotalOutput.MaxResponseTime),
-		TotalMinResponseTime: float64(entryTotalOutput.MinResponseTime),
-		TotalRPS:             entryTotalOutput.currentRps,
-		TotalFailRatio:       getTotalFailRatio(entryTotalOutput.NumRequests, entryTotalOutput.NumFailures),
-		TotalFailPerSec:      entryTotalOutput.currentFailPerSec,
-		Stats:                make([]*statsEntryOutput, 0, len(stats)),
-		Errors:               errors,
+		UserCount:                  userCount,
+		State:                      state,
+		Duration:                   entryTotalOutput.duration,
+		TotalStats:                 entryTotalOutput,
+		TransactionsPassed:         transactionsPassed,
+		TransactionsFailed:         transactionsFailed,
+		TotalAvgResponseTime:       entryTotalOutput.avgResponseTime,
+		Total95PercentResponseTime: entryTotalOutput.ninetyFivePercentageResponseTime,
+		Total99PercentResponseTime: entryTotalOutput.ninetyNinePercentageResponseTime,
+		TotalMaxResponseTime:       float64(entryTotalOutput.MaxResponseTime),
+		TotalMinResponseTime:       float64(entryTotalOutput.MinResponseTime),
+		TotalRPS:                   entryTotalOutput.currentRps,
+		TotalFailRatio:             getTotalFailRatio(entryTotalOutput.NumRequests, entryTotalOutput.NumFailures),
+		TotalFailPerSec:            entryTotalOutput.currentFailPerSec,
+		Stats:                      make([]*statsEntryOutput, 0, len(stats)),
+		Errors:                     errors,
 	}
 
 	// convert stats
@@ -261,13 +300,15 @@ func deserializeStatsEntry(stat interface{}) (entryOutput *statsEntryOutput, err
 
 	numRequests := entry.NumRequests
 	entryOutput = &statsEntryOutput{
-		statsEntry:         entry,
-		duration:           duration,
-		medianResponseTime: getMedianResponseTime(numRequests, entry.ResponseTimes),
-		avgResponseTime:    getAvgResponseTime(numRequests, entry.TotalResponseTime),
-		avgContentLength:   getAvgContentLength(numRequests, entry.TotalContentLength),
-		currentRps:         getCurrentRps(numRequests, duration),
-		currentFailPerSec:  getCurrentFailPerSec(entry.NumFailures, duration),
+		statsEntry:                       entry,
+		duration:                         duration,
+		medianResponseTime:               getMedianResponseTime(numRequests, entry.ResponseTimes),
+		ninetyFivePercentageResponseTime: get99PercentResponseTime(entry.ResponseTimes),
+		ninetyNinePercentageResponseTime: get95PercentResponseTime(entry.ResponseTimes),
+		avgResponseTime:                  getAvgResponseTime(numRequests, entry.TotalResponseTime),
+		avgContentLength:                 getAvgContentLength(numRequests, entry.TotalContentLength),
+		currentRps:                       getCurrentRps(numRequests, duration),
+		currentFailPerSec:                getCurrentFailPerSec(entry.NumFailures, duration),
 	}
 	return
 }
