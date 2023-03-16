@@ -400,9 +400,15 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 		unsafeTime = 6000
 	}
 	if stepResult.Elapsed >= unsafeTime {
+		var outPutInfo interface{}
+		if rb.req.Header.Get("Cloud-Trace-Id") == "" {
+			outPutInfo = resp.Body
+		} else {
+			outPutInfo = rb.req.Header.Get("Cloud-Trace-Id")
+		}
 		log.Error().Str("request time", strconv.FormatInt(stepResult.Elapsed, 10)+"ms").
 			Str("start at", start.String()).
-			Str("trace id", rb.req.Header.Get("Cloud-Trace-Id")).
+			Interface("trace info", outPutInfo).
 			Msg("超时请求时间为：" + strconv.FormatInt(unsafeTime, 10) + "ms")
 	}
 

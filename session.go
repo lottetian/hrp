@@ -125,7 +125,6 @@ func (r *SessionRunner) MergeStepVariables(vars map[string]interface{}) (map[str
 	overrideVars := mergeVariables(vars, r.sessionVariables)
 	// step variables > testcase config variables
 	overrideVars = mergeVariables(overrideVars, r.parsedConfig.Variables)
-
 	// parse step variables
 	parsedVariables, err := r.parser.ParseVariables(overrideVars)
 	if err != nil {

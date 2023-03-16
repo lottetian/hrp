@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/httprunner/funplugin"
 	"github.com/httprunner/funplugin/shared"
@@ -189,15 +190,28 @@ func (p *Parser) ParseString(raw string, variablesMapping map[string]interface{}
 			if err != nil {
 				return raw, err
 			}
-
+			callStart := time.Now()
 			result, err := p.CallFunc(funcName, parsedArgs.([]interface{})...)
+			costFunc := time.Since(callStart).Milliseconds()
 			if err != nil {
 				log.Error().Str("funcName", funcName).Interface("arguments", arguments).
 					Err(err).Msg("call function failed")
 				return raw, err
 			}
-			log.Info().Str("funcName", funcName).Interface("arguments", arguments).
-				Interface("output", result).Msg("call function success")
+			if costFunc > 100 {
+				log.Error().
+					Str("funcName", funcName).
+					Interface("arguments", arguments).
+					Interface("output", result).
+					Interface("costTime", costFunc).
+					Msg("call function success")
+			}
+			log.Info().
+				Str("funcName", funcName).
+				Interface("arguments", arguments).
+				Interface("output", result).
+				Interface("costTime", costFunc).
+				Msg("call function success")
 
 			if funcMatched[0] == raw {
 				// raw_string is a function, e.g. "${add_one(3)}", return its eval value directly
