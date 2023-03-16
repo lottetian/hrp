@@ -393,24 +393,6 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	}
 
 	stepResult.Elapsed = time.Since(start).Milliseconds()
-	var unsafeTime int64
-	if step.Request.UnsafeTime != 0 {
-		unsafeTime = int64(time.Duration(step.Request.UnsafeTime*1000) * time.Millisecond)
-	} else {
-		unsafeTime = 6000
-	}
-	if stepResult.Elapsed >= unsafeTime {
-		var outPutInfo interface{}
-		if rb.req.Header.Get("Cloud-Trace-Id") == "" {
-			outPutInfo = resp.Body
-		} else {
-			outPutInfo = rb.req.Header.Get("Cloud-Trace-Id")
-		}
-		log.Error().Str("request time", strconv.FormatInt(stepResult.Elapsed, 10)+"ms").
-			Str("start at", start.String()).
-			Interface("trace info", outPutInfo).
-			Msg("超时请求时间为：" + strconv.FormatInt(unsafeTime, 10) + "ms")
-	}
 
 	// decode response body in br/gzip/deflate formats
 	err = decodeResponseBody(resp)
@@ -448,6 +430,25 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 		if err != nil {
 			return stepResult, errors.Wrap(err, "run teardown hooks failed")
 		}
+	}
+
+	var unsafeTime int64
+	if step.Request.UnsafeTime != 0 {
+		unsafeTime = int64(time.Duration(step.Request.UnsafeTime*1000) * time.Millisecond)
+	} else {
+		unsafeTime = 6000
+	}
+	if stepResult.Elapsed >= unsafeTime {
+		var outPutInfo interface{}
+		if rb.req.Header.Get("Cloud-Trace-Id") == "" {
+			outPutInfo = respObj.respObjMeta
+		} else {
+			outPutInfo = rb.req.Header.Get("Cloud-Trace-Id")
+		}
+		log.Error().Str("request time", strconv.FormatInt(stepResult.Elapsed, 10)+"ms").
+			Str("start at", start.String()).
+			Interface("trace info", outPutInfo).
+			Msg("超时请求时间为：" + strconv.FormatInt(unsafeTime, 10) + "ms")
 	}
 
 	sessionData.ReqResps.Request = rb.requestMap
