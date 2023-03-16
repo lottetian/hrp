@@ -79,26 +79,26 @@ func (r *HRPRunner) SetClientTransport(maxConns int, disableKeepAlive bool, disa
 		Bool("disableKeepAlive", disableKeepAlive).
 		Bool("disableCompression", disableCompression).
 		Msg("[init] SetClientTransport")
-	//r.httpClient.Transport = &http.Transport{
-	//	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	//	DialContext: (&net.Dialer{
-	//		Timeout:   60 * time.Second, // 连接超时时间
-	//		KeepAlive: 60 * time.Second, // 保持长连接的时间
-	//	}).DialContext,
-	//	MaxIdleConns:        1000,
-	//	MaxIdleConnsPerHost: maxConns,
-	//	DisableKeepAlives:   disableKeepAlive,
-	//	DisableCompression:  disableCompression,
-	//	TLSNextProto:        make(map[string]func(string, *tls.Conn) http.RoundTripper),
-	//}
 	r.httpClient.Transport = &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		DialContext:         (&net.Dialer{}).DialContext,
-		MaxIdleConns:        0,
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: (&net.Dialer{
+			Timeout:   60 * time.Second, // 连接超时时间
+			KeepAlive: 60 * time.Second, // 保持长连接的时间
+		}).DialContext,
+		MaxIdleConns:        1000,
 		MaxIdleConnsPerHost: maxConns,
 		DisableKeepAlives:   disableKeepAlive,
 		DisableCompression:  disableCompression,
+		TLSNextProto:        make(map[string]func(string, *tls.Conn) http.RoundTripper),
 	}
+	//r.httpClient.Transport = &http.Transport{
+	//	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	//	DialContext:         (&net.Dialer{}).DialContext,
+	//	MaxIdleConns:        0,
+	//	MaxIdleConnsPerHost: maxConns,
+	//	DisableKeepAlives:   disableKeepAlive,
+	//	DisableCompression:  disableCompression,
+	//}
 	r.http2Client.Transport = &http2.Transport{
 		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
 		DisableCompression: disableCompression,
