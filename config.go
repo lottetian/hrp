@@ -42,6 +42,12 @@ func (c *TConfig) WithVariables(variables map[string]interface{}) *TConfig {
 	return c
 }
 
+// SetPluginPath sets plugin path for current testcase.
+func (c *TConfig) SetPluginPath(plugin string) *TConfig {
+	c.Path = plugin
+	return c
+}
+
 // SetBaseURL sets base URL for current testcase.
 func (c *TConfig) SetBaseURL(baseURL string) *TConfig {
 	c.BaseURL = baseURL
