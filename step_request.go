@@ -54,6 +54,7 @@ type Request struct {
 	AllowRedirects bool                   `json:"allow_redirects,omitempty" yaml:"allow_redirects,omitempty"`
 	Verify         bool                   `json:"verify,omitempty" yaml:"verify,omitempty"`
 	Upload         map[string]interface{} `json:"upload,omitempty" yaml:"upload,omitempty"`
+	Host           string                 `json:"host" yaml:"host"`
 }
 
 func newRequestBuilder(parser *Parser, config *TConfig, stepRequest *Request) *requestBuilder {
@@ -380,6 +381,11 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	// set step timeout
 	if step.Request.Timeout != 0 {
 		client.Timeout = time.Duration(step.Request.Timeout*1000) * time.Millisecond
+	}
+
+	// set request host
+	if step.Request.Host != "" {
+		rb.req.Host = step.Request.Host
 	}
 
 	// do request action
