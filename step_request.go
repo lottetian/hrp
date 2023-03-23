@@ -356,13 +356,6 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 		}
 	}
 
-	// log & print request
-	if r.LogOn() {
-		if err := printRequest(rb.req); err != nil {
-			return stepResult, err
-		}
-	}
-
 	// stat HTTP request
 	var httpStat httpstat.Stat
 	if r.HTTPStatOn() {
@@ -386,6 +379,14 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	// set request host
 	if step.Request.Host != "" {
 		rb.req.Host = step.Request.Host
+		log.Info().Str("req host", rb.req.Host).Msg("set host success!")
+	}
+
+	// log & print request
+	if r.LogOn() {
+		if err := printRequest(rb.req); err != nil {
+			return stepResult, err
+		}
 	}
 
 	// do request action
