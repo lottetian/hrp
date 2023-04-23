@@ -478,6 +478,7 @@ func runStepRequest(r *SessionRunner, step *TStep) (stepResult *StepResult, err 
 	} else {
 		log.Error().
 			Str("trace id", rb.req.Header.Get("Cloud-Trace-Id")).
+			Interface("response", respObj.respObjMeta).
 			Msg(err.Error())
 	}
 	stepResult.ContentSize = resp.ContentLength
